@@ -1790,6 +1790,7 @@ async function blobUrlToDataUri(blobUrl, mType, compress) {
 }
 
 /** Compress an image blob via canvas — max 800px, JPEG q=0.65 */
+const __compressCanvas = { el: null, ctx: null };
 function compressImageBlob(blob) {
     return new Promise((resolve) => {
         const img = new Image();
@@ -1802,12 +1803,14 @@ function compressImageBlob(blob) {
                 w = Math.round(w * scale);
                 h = Math.round(h * scale);
             }
-            const canvas = document.createElement('canvas');
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, w, h);
-            const dataUri = canvas.toDataURL('image/jpeg', 0.65);
+            if (!__compressCanvas.el) {
+                __compressCanvas.el = document.createElement('canvas');
+                __compressCanvas.ctx = __compressCanvas.el.getContext('2d');
+            }
+            __compressCanvas.el.width = w;
+            __compressCanvas.el.height = h;
+            __compressCanvas.ctx.drawImage(img, 0, 0, w, h);
+            const dataUri = __compressCanvas.el.toDataURL('image/jpeg', 0.65);
             URL.revokeObjectURL(url);
             resolve(dataUri);
         };
