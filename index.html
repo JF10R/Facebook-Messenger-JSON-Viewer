@@ -73,6 +73,7 @@
                     <span><strong>Export</strong></span>
                     <div class="export-section">
                         <button id="exportPdfBtn" class="btn btn-primary" type="button">Export to PDF</button>
+                        <button id="exportHtmlBtn" class="btn btn-primary" type="button">&#128230; Save as HTML</button>
                         <small class="export-hint">Large conversations may take time. A preview will be shown before download.</small>
                         <small class="export-note">PDF export is an experimental feature and may have limitations.</small>
                     </div>
@@ -195,6 +196,36 @@
                 <button id="pdfCancelBtn" class="btn btn-secondary" type="button">Cancel</button>
                 <button id="pdfDownloadBtn" class="btn btn-primary" type="button" disabled>Download PDF</button>
                 <button id="pdfCloseBtn" class="btn btn-secondary" type="button">Close</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- HTML export modal -->
+    <div id="htmlModal" class="html-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="htmlTitle">
+        <div class="html-backdrop" tabindex="-1"></div>
+        <div class="html-card" role="document">
+            <header class="html-header">
+                <h2 id="htmlTitle">Save as HTML</h2>
+            </header>
+            <div class="html-body">
+                <div id="htmlProgress" class="html-progress">
+                    <div id="htmlStatus" class="html-status">Preparing...</div>
+                    <div class="html-progressbar"><div id="htmlProgressFill" class="fill" style="width:0%"></div></div>
+                    <div id="htmlSizeEstimate" class="html-size-estimate"></div>
+                </div>
+                <div class="html-options">
+                    <label><input type="checkbox" id="htmlIncludeMedia" checked> Include media</label>
+                    <label><input type="checkbox" id="htmlCompressImages" checked> Compress images (smaller file)</label>
+                    <div class="html-slider-group" id="htmlCompressionSettings">
+                        <label>Quality: <input type="range" id="htmlJpegQuality" min="30" max="95" value="65" step="5"><span id="htmlQualityLabel">65%</span></label>
+                        <label>Max size: <input type="range" id="htmlMaxRes" min="400" max="2000" value="800" step="100"><span id="htmlResLabel">800px</span></label>
+                    </div>
+                </div>
+            </div>
+            <footer class="html-footer">
+                <button id="htmlCancelBtn" class="btn btn-secondary" type="button">Cancel</button>
+                <button id="htmlDownloadBtn" class="btn btn-primary" type="button" disabled>Download</button>
+                <button id="htmlCloseBtn" class="btn btn-secondary" type="button">Close</button>
             </footer>
         </div>
     </div>

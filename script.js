@@ -1767,13 +1767,13 @@ function htmlSetSize(text) {
 }
 
 /** Convert a blob URL to a base64 data URI, optionally compressing images */
-async function blobUrlToDataUri(blobUrl, mType, compress) {
+async function blobUrlToDataUri(blobUrl, mType, compress, maxPx, quality) {
     const resp = await fetch(blobUrl);
     const blob = await resp.blob();
 
     if (compress && mType === 'image' && blob.size > 0) {
         try {
-            const dataUri = await compressImageBlob(blob);
+            const dataUri = await compressImageBlob(blob, maxPx, quality);
             if (dataUri) return dataUri;
         } catch (e) { console.warn('Image compression failed, using raw base64:', e); }
     }
@@ -1786,14 +1786,15 @@ async function blobUrlToDataUri(blobUrl, mType, compress) {
     });
 }
 
-/** Compress an image blob via canvas — max 800px, JPEG q=0.65 */
+/** Compress an image blob via canvas — configurable max size and JPEG quality */
 const __compressCanvas = { el: null, ctx: null };
-function compressImageBlob(blob) {
+function compressImageBlob(blob, maxPx, quality) {
+    const MAX = maxPx || 800;
+    const Q = quality || 0.65;
     return new Promise((resolve) => {
         const img = new Image();
         const url = URL.createObjectURL(blob);
         img.onload = () => {
-            const MAX = 800;
             let { width: w, height: h } = img;
             if (w > MAX || h > MAX) {
                 const scale = MAX / Math.max(w, h);
@@ -1807,7 +1808,7 @@ function compressImageBlob(blob) {
             __compressCanvas.el.width = w;
             __compressCanvas.el.height = h;
             __compressCanvas.ctx.drawImage(img, 0, 0, w, h);
-            const dataUri = __compressCanvas.el.toDataURL('image/jpeg', 0.65);
+            const dataUri = __compressCanvas.el.toDataURL('image/jpeg', Q);
             URL.revokeObjectURL(url);
             resolve(dataUri);
         };
@@ -1827,6 +1828,8 @@ async function buildHtmlArchive(data, selectedPerspective) {
     const messages = Array.isArray(data.messages) ? data.messages : [];
     const compressImages = !!document.getElementById('htmlCompressImages')?.checked;
     const includeMedia = !!document.getElementById('htmlIncludeMedia')?.checked;
+    const jpegQuality = (parseInt(document.getElementById('htmlJpegQuality')?.value, 10) || 65) / 100;
+    const maxResolution = parseInt(document.getElementById('htmlMaxRes')?.value, 10) || 800;
 
     const showMyName = !!document.getElementById('showMyName')?.checked;
     const showTheirName = !!document.getElementById('showTheirName')?.checked;
@@ -1854,7 +1857,7 @@ async function buildHtmlArchive(data, selectedPerspective) {
                 const matchingFile = findMediaFile(fileName);
                 if (!matchingFile || !mediaFiles[matchingFile]) return Promise.resolve(null);
                 const mType = mediaTypes[matchingFile] || getMediaType(fileName);
-                return blobUrlToDataUri(mediaFiles[matchingFile], mType, compressImages)
+                return blobUrlToDataUri(mediaFiles[matchingFile], mType, compressImages, maxResolution, jpegQuality)
                     .then(dataUri => ({ fileName, dataUri }))
                     .catch(e => { console.warn('Media conversion failed:', fileName, e); return null; });
             });
@@ -2039,6 +2042,26 @@ function downloadHtmlArchive() {
 exportHtmlBtn?.addEventListener('click', (e) => {
     e.preventDefault();
     startHtmlExport();
+});
+
+// Slider label updates and compress toggle
+document.getElementById('htmlJpegQuality')?.addEventListener('input', (e) => {
+    const label = document.getElementById('htmlQualityLabel');
+    if (label) label.textContent = e.target.value + '%';
+});
+document.getElementById('htmlMaxRes')?.addEventListener('input', (e) => {
+    const label = document.getElementById('htmlResLabel');
+    if (label) label.textContent = e.target.value + 'px';
+});
+document.getElementById('htmlCompressImages')?.addEventListener('change', (e) => {
+    const settings = document.getElementById('htmlCompressionSettings');
+    if (settings) settings.style.display = e.target.checked ? '' : 'none';
+});
+document.getElementById('htmlIncludeMedia')?.addEventListener('change', (e) => {
+    const compressCb = document.getElementById('htmlCompressImages');
+    const settings = document.getElementById('htmlCompressionSettings');
+    if (compressCb) compressCb.disabled = !e.target.checked;
+    if (settings) settings.style.display = (e.target.checked && compressCb?.checked) ? '' : 'none';
 });
 
 htmlCancelBtn?.addEventListener('click', (e) => {
@@ -2308,6 +2331,20 @@ function renderLightboxItem() {
     const available = __galleryItems.filter(i => i.fileURL).length;
     const position = __galleryItems.slice(0, __lbIndex + 1).filter(i => i.fileURL).length;
     if (mediaLbCaption) {
-        mediaLbCaption.textContent = `${item.sender} · ${new Date(item.timestamp).toLocaleString()} · ${position}/${available}`;
+        mediaLbCaption.innerHTML = '';
+        const info = document.createElement('span');
+        info.textContent = `${item.sender} · ${new Date(item.timestamp).toLocaleString()} · ${position}/${available}`;
+        mediaLbCaption.appendChild(info);
+        if (item.msgIdx != null) {
+            const btn = document.createElement('button');
+            btn.className = 'media-lb-goto';
+            btn.textContent = 'Go to message ↗';
+            btn.addEventListener('click', () => {
+                closeLightbox();
+                closeMediaModal();
+                jumpToMessage(item.msgIdx);
+            });
+            mediaLbCaption.appendChild(btn);
+        }
     }
 }
