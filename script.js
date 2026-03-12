@@ -13,7 +13,7 @@ let __convSearchTimer = null;
 document.getElementById('convSearch')?.addEventListener('input', (e) => {
     clearTimeout(__convSearchTimer);
     const val = e.target.value;
-    __convSearchTimer = setTimeout(() => filterConvList(val), 280);
+    __convSearchTimer = setTimeout(() => filterConvList(val), 450);
 });
 
 // ZIP mode state
@@ -1811,6 +1811,7 @@ function compressImageBlob(blob, maxPx, quality) {
             }
             __compressCanvas.el.width = w;
             __compressCanvas.el.height = h;
+            __compressCanvas.ctx.clearRect(0, 0, w, h);
             __compressCanvas.ctx.drawImage(img, 0, 0, w, h);
             const dataUri = __compressCanvas.el.toDataURL('image/jpeg', Q);
             URL.revokeObjectURL(url);
@@ -1854,7 +1855,7 @@ async function buildHtmlArchive(data, selectedPerspective) {
         const refArr = [...refs];
         const total = refArr.length;
         const mediaLookup = getMediaLookupMap();
-        const BATCH = 6;
+        const BATCH = 15;
         for (let i = 0; i < total; i += BATCH) {
             if (__htmlState.cancel) throw new Error('cancelled');
             const batch = refArr.slice(i, Math.min(i + BATCH, total));
