@@ -1909,7 +1909,7 @@ async function buildHtmlArchive(data, selectedPerspective) {
                 continue;
             }
             if (mType === 'image') {
-                mediaParts.push(`<img src="${dataUri}" alt="Image" loading="lazy">`);
+                mediaParts.push(`<img src="${dataUri}" alt="Image">`);
             } else if (mType === 'video') {
                 mediaParts.push(`<video controls preload="metadata"><source src="${dataUri}" type="video/mp4"></video>`);
             } else if (mType === 'audio') {
