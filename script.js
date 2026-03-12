@@ -1828,18 +1828,24 @@ async function buildHtmlArchive(data, selectedPerspective) {
 
         const refArr = [...refs];
         const total = refArr.length;
-        for (let i = 0; i < total; i++) {
+        const BATCH = 6;
+        for (let i = 0; i < total; i += BATCH) {
             if (__htmlState.cancel) throw new Error('cancelled');
-            const fileName = refArr[i];
-            const matchingFile = Object.keys(mediaFiles).find(f => f.toLowerCase().endsWith(fileName));
-            if (!matchingFile || !mediaFiles[matchingFile]) continue;
-            const mType = mediaTypes[matchingFile] || getMediaType(fileName);
-            htmlSetProgress(((i + 1) / total) * 60, `Converting media ${i + 1}/${total}: ${fileName}`);
-            try {
-                const dataUri = await blobUrlToDataUri(mediaFiles[matchingFile], mType, compressImages);
-                mediaMap.set(fileName, dataUri);
-            } catch (_) { /* skip failed media */ }
-            if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
+            const batch = refArr.slice(i, Math.min(i + BATCH, total));
+            const promises = batch.map(fileName => {
+                const matchingFile = Object.keys(mediaFiles).find(f => f.toLowerCase().endsWith(fileName));
+                if (!matchingFile || !mediaFiles[matchingFile]) return Promise.resolve(null);
+                const mType = mediaTypes[matchingFile] || getMediaType(fileName);
+                return blobUrlToDataUri(mediaFiles[matchingFile], mType, compressImages)
+                    .then(dataUri => ({ fileName, dataUri }))
+                    .catch(() => null);
+            });
+            const results = await Promise.all(promises);
+            for (const result of results) {
+                if (result?.dataUri) mediaMap.set(result.fileName, result.dataUri);
+            }
+            htmlSetProgress(((Math.min(i + BATCH, total)) / total) * 60, `Converting media ${Math.min(i + BATCH, total)}/${total}...`);
+            await new Promise(r => setTimeout(r, 0));
         }
     }
 
