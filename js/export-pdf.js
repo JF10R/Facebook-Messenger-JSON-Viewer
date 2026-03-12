@@ -137,7 +137,7 @@ async function buildChatPdf(data, selectedPerspective) {
         if (__pdfState.cancel) { offscreen.remove(); throw new Error('cancelled'); }
 
         const msg = messages[i];
-        const sender = msg.senderName || msg.sender_name || 'Unknown';
+        const sender = getSenderName(msg);
         const fromMe = sender === selectedPerspective;
         const div = document.createElement('div');
         div.classList.add('message', fromMe ? 'from-me' : 'from-them');

@@ -138,7 +138,7 @@ async function buildHtmlArchive(data, selectedPerspective) {
         const refs = new Set();
         for (const msg of messages) {
             for (const item of getMessageMedia(msg)) {
-                if (item?.uri) refs.add(item.uri.split(/[\\\/]/).pop().toLowerCase());
+                if (item?.uri) refs.add(parseMediaFileName(item.uri).fileName);
             }
         }
 
@@ -169,17 +169,17 @@ async function buildHtmlArchive(data, selectedPerspective) {
     const msgParts = [];
     for (let i = 0; i < messages.length; i++) {
         const msg    = messages[i];
-        const sender = msg.senderName || msg.sender_name || 'Unknown';
+        const sender = getSenderName(msg);
         const fromMe = sender === selectedPerspective;
-        const text   = escapeHtml(String(msg.text || msg.content || '')).replace(/\n/g, '<br>');
+        const text   = escapeHtml(getMessageText(msg)).replace(/\n/g, '<br>');
         const ts     = msg.timestamp || msg.timestamp_ms || 0;
 
         const mediaParts = [];
         for (const media of getMessageMedia(msg)) {
             if (!media?.uri) continue;
-            const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
+            const { fileName, ext } = parseMediaFileName(media.uri);
             const dataUri  = mediaMap.get(fileName);
-            const mType    = fileName.split('.').pop().toLowerCase() === 'mp4' ? 'video' : getMediaType(fileName);
+            const mType    = ext === 'mp4' ? 'video' : getMediaType(fileName);
             if (!dataUri) { mediaParts.push(`<span class="media-missing">[Media: ${escapeHtml(fileName)}]</span>`); continue; }
             if (mType === 'image')  mediaParts.push(`<img src="${dataUri}" alt="Image">`);
             else if (mType === 'video') mediaParts.push(`<video controls preload="metadata"><source src="${dataUri}" type="video/mp4"></video>`);

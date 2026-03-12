@@ -189,7 +189,7 @@ function renderChunk(chunkIndex, messages, selectedValue) {
     messages.forEach((msg, localIdx) => {
         const globalIdx = chunkIndex * CHUNK_SIZE + localIdx;
         const div = document.createElement('div');
-        const sender = msg.senderName || msg.sender_name || 'Unknown';
+        const sender = getSenderName(msg);
         div.classList.add('message', sender === selectedValue ? 'from-me' : 'from-them');
         div.dataset.msgIndex = globalIdx;
         try { div.__rawMessage = msg; } catch (e) {}
@@ -205,8 +205,8 @@ function renderChunk(chunkIndex, messages, selectedValue) {
 }
 
 function createMessageHTML(msg, highlightQuery) {
-    const sender = msg.senderName || msg.sender_name || 'Unknown';
-    const rawText = msg.text || msg.content || '';
+    const sender = getSenderName(msg);
+    const rawText = getMessageText(msg);
     const escaped = highlightQuery ? highlightText(String(rawText), highlightQuery) : escapeHtml(String(rawText));
     const text = escaped.replace(/\n/g, '<br>');
     const timestamp = msg.timestamp || msg.timestamp_ms || 0;
@@ -217,11 +217,10 @@ function createMessageHTML(msg, highlightQuery) {
         <div class="message-content">
             ${text}
             ${mediaItems.map(media => {
-                const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
+                const { fileName, ext } = parseMediaFileName(media.uri);
                 const matchingFile = findMediaFile(fileName);
                 const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
-                const ext = fileName.split('.').pop().toLowerCase();
-                const mediaType = ext === 'mp4' ? 'video' : (matchingFile ? mediaTypes[matchingFile] : getMediaType(fileName));
+                const mediaType = resolveMediaType(ext, matchingFile);
 
                 if (mediaType === 'image') {
                     return fileURL

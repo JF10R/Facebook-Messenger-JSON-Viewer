@@ -36,6 +36,12 @@ function findMediaFile(fileName) {
     return getMediaLookupMap().get(fileName.toLowerCase()) || null;
 }
 
+/** Resolve media type; mp4 always maps to video regardless of stored type */
+function resolveMediaType(ext, matchingFile) {
+    if (ext === 'mp4') return 'video';
+    return matchingFile ? mediaTypes[matchingFile] : getMediaType('x.' + ext);
+}
+
 function resetMedia() {
     Object.values(mediaFiles).forEach(url => URL.revokeObjectURL(url));
     mediaFiles = {};

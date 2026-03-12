@@ -52,6 +52,13 @@ function decodeMessengerJson(text) {
     return { data: JSON.parse(decodeURIComponent(escape(replaced))), isThreadPath: true };
 }
 
+/** Extract lowercased filename + extension from a media URI */
+function parseMediaFileName(uri) {
+    const fileName = uri.split(/[\\\/]/).pop().toLowerCase();
+    const ext = fileName.split('.').pop().toLowerCase();
+    return { fileName, ext };
+}
+
 /** Normalised sender name from either message format */
 function getSenderName(msg) {
     return msg.senderName || msg.sender_name || 'Unknown';

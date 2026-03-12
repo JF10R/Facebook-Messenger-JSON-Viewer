@@ -47,15 +47,14 @@ function collectAllMedia(messages) {
     const mediaLookup = getMediaLookupMap();
     const items = [];
     messages.forEach((msg, msgIdx) => {
-        const sender = msg.senderName || msg.sender_name || 'Unknown';
+        const sender = getSenderName(msg);
         const timestamp = msg.timestamp || msg.timestamp_ms || 0;
         getMessageMedia(msg).forEach(media => {
             if (!media.uri) return;
-            const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
+            const { fileName, ext } = parseMediaFileName(media.uri);
             const matchingFile = mediaLookup.get(fileName) || null;
             const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
-            const ext = fileName.split('.').pop().toLowerCase();
-            const mediaType = ext === 'mp4' ? 'video' : (matchingFile ? mediaTypes[matchingFile] : getMediaType(fileName));
+            const mediaType = resolveMediaType(ext, matchingFile);
             items.push({ fileName, fileURL, mediaType, sender, timestamp, msgIdx });
         });
     });
