@@ -1775,7 +1775,7 @@ async function blobUrlToDataUri(blobUrl, mType, compress) {
         try {
             const dataUri = await compressImageBlob(blob);
             if (dataUri) return dataUri;
-        } catch (_) { /* fall through to raw base64 */ }
+        } catch (e) { console.warn('Image compression failed, using raw base64:', e); }
     }
 
     return new Promise((resolve, reject) => {
@@ -1856,7 +1856,7 @@ async function buildHtmlArchive(data, selectedPerspective) {
                 const mType = mediaTypes[matchingFile] || getMediaType(fileName);
                 return blobUrlToDataUri(mediaFiles[matchingFile], mType, compressImages)
                     .then(dataUri => ({ fileName, dataUri }))
-                    .catch(() => null);
+                    .catch(e => { console.warn('Media conversion failed:', fileName, e); return null; });
             });
             const results = await Promise.all(promises);
             for (const result of results) {
