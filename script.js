@@ -686,6 +686,11 @@ function getMediaType(filename) {
     return "unknown";
 }
 
+/** Combine all media arrays from a message into a single flat array */
+function getMessageMedia(msg) {
+    return [msg.media, msg.photos, msg.videos, msg.audio, msg.audio_files, msg.gifs].flat().filter(Boolean);
+}
+
 // O(1) media lookup: maps lowercased filename → full key in mediaFiles
 let __mediaLookupCache = null;
 function getMediaLookupMap() {
@@ -778,15 +783,7 @@ function createMessageHTML(msg, highlightQuery) {
     const rawText = msg.text || msg.content || "";
     const text = highlightQuery ? highlightText(String(rawText), highlightQuery) : escapeHtml(String(rawText));
     const timestamp = msg.timestamp || msg.timestamp_ms || 0;
-    // Combine all possible media arrays
-    const mediaItems = [].concat(
-        msg.media || [],
-        msg.photos || [],
-        msg.videos || [],
-        msg.audio || [],
-        msg.audio_files || [], // Add support for audio_files
-        msg.gifs || []
-    );
+    const mediaItems = getMessageMedia(msg);
 
     return `
         <div class="sender-name">${escapeHtml(sender)}</div>
@@ -866,7 +863,7 @@ function buildSearchIndex(messages) {
         // include reactions summary
         if (m.reactions && m.reactions.length) parts.push(m.reactions.map(r => r.reaction + ' ' + (r.actor||'')).join(' '));
         // include media filenames
-        const mediaItems = [].concat(m.media || [], m.photos || [], m.videos || [], m.audio || [], m.audio_files || [], m.gifs || []);
+        const mediaItems = getMessageMedia(m);
         mediaItems.forEach(mi => { if (mi && mi.uri) parts.push(mi.uri); });
 
         const text = parts.join(' ');
@@ -1841,7 +1838,7 @@ async function buildHtmlArchive(data, selectedPerspective) {
     if (includeMedia) {
         const refs = new Set();
         for (const msg of messages) {
-            const items = [].concat(msg.media || [], msg.photos || [], msg.videos || [], msg.audio || [], msg.audio_files || [], msg.gifs || []);
+            const items = getMessageMedia(msg);
             for (const item of items) {
                 if (item?.uri) refs.add(item.uri.split(/[\\\/]/).pop().toLowerCase());
             }
@@ -1884,8 +1881,8 @@ async function buildHtmlArchive(data, selectedPerspective) {
         const text = escapeHtml(String(rawText));
         const timestamp = msg.timestamp || msg.timestamp_ms || 0;
 
-        const mediaItems = [].concat(msg.media || [], msg.photos || [], msg.videos || [], msg.audio || [], msg.audio_files || [], msg.gifs || []);
-        let mediaHtml = '';
+        const mediaItems = getMessageMedia(msg);
+        const mediaParts = [];
         for (const media of mediaItems) {
             if (!media?.uri) continue;
             const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
@@ -1894,17 +1891,18 @@ async function buildHtmlArchive(data, selectedPerspective) {
             const mType = ext === 'mp4' ? 'video' : getMediaType(fileName);
 
             if (!dataUri) {
-                mediaHtml += `<span class="media-missing">[Media: ${escapeHtml(fileName)}]</span>`;
+                mediaParts.push(`<span class="media-missing">[Media: ${escapeHtml(fileName)}]</span>`);
                 continue;
             }
             if (mType === 'image') {
-                mediaHtml += `<img src="${dataUri}" alt="Image" loading="lazy">`;
+                mediaParts.push(`<img src="${dataUri}" alt="Image" loading="lazy">`);
             } else if (mType === 'video') {
-                mediaHtml += `<video controls preload="metadata"><source src="${dataUri}" type="video/mp4"></video>`;
+                mediaParts.push(`<video controls preload="metadata"><source src="${dataUri}" type="video/mp4"></video>`);
             } else if (mType === 'audio') {
-                mediaHtml += `<audio controls preload="metadata"><source src="${dataUri}" type="audio/mpeg"></audio>`;
+                mediaParts.push(`<audio controls preload="metadata"><source src="${dataUri}" type="audio/mpeg"></audio>`);
             }
         }
+        const mediaHtml = mediaParts.join('');
 
         const reactionsHtml = (showReacts && msg.reactions?.length)
             ? `<div class="reaction">${msg.reactions.map(r => `${escapeHtml(r.actor)}: ${escapeHtml(r.reaction)}`).join(', ')}</div>`
@@ -2105,25 +2103,18 @@ document.addEventListener('keydown', (e) => {
 
 function collectAllMedia(messages) {
     const items = [];
-    messages.forEach(msg => {
+    messages.forEach((msg, msgIdx) => {
         const sender = msg.senderName || msg.sender_name || 'Unknown';
         const timestamp = msg.timestamp || msg.timestamp_ms || 0;
-        const mediaItems = [].concat(
-            msg.media || [],
-            msg.photos || [],
-            msg.videos || [],
-            msg.audio || [],
-            msg.audio_files || [],
-            msg.gifs || []
-        );
+        const mediaItems = getMessageMedia(msg);
         mediaItems.forEach(media => {
-            if (!media || !media.uri) return;
+            if (!media.uri) return;
             const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
             const matchingFile = findMediaFile(fileName);
             const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
             const extension = fileName.split('.').pop().toLowerCase();
             const mediaType = extension === 'mp4' ? 'video' : (matchingFile ? mediaTypes[matchingFile] : getMediaType(fileName));
-            items.push({ fileName, fileURL, mediaType, sender, timestamp });
+            items.push({ fileName, fileURL, mediaType, sender, timestamp, msgIdx });
         });
     });
     return items;
