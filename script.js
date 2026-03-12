@@ -675,6 +675,7 @@ function resetMedia() {
     Object.values(mediaFiles).forEach(url => URL.revokeObjectURL(url));
     mediaFiles = {};
     mediaTypes = {};
+    __mediaLookupCache = null;
 }
 
 function getMediaType(filename) {
@@ -683,6 +684,23 @@ function getMediaType(filename) {
     if (["mp4", "webm", "ogg"].includes(extension)) return "video";
     if (["mp3", "wav", "aac", "ogg"].includes(extension)) return "audio";
     return "unknown";
+}
+
+// O(1) media lookup: maps lowercased filename → full key in mediaFiles
+let __mediaLookupCache = null;
+function getMediaLookupMap() {
+    if (__mediaLookupCache) return __mediaLookupCache;
+    __mediaLookupCache = new Map();
+    for (const key of Object.keys(mediaFiles)) {
+        const fileName = key.toLowerCase().split(/[\\\/]/).pop();
+        __mediaLookupCache.set(fileName, key);
+    }
+    return __mediaLookupCache;
+}
+
+function findMediaFile(fileName) {
+    const map = getMediaLookupMap();
+    return map.get(fileName.toLowerCase()) || null;
 }
 
 // Highlight helpers: diacritic-insensitive matching by building a normalized mapping
@@ -776,7 +794,7 @@ function createMessageHTML(msg, highlightQuery) {
             ${text}
             ${mediaItems.map(media => {
                 const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase(); // Normalize to lowercase
-                const matchingFile = Object.keys(mediaFiles).find(f => f.toLowerCase().endsWith(fileName));
+                const matchingFile = findMediaFile(fileName);
                 const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
                 // Determine media type based on file extension, overriding JSON context if needed
                 const extension = fileName.split('.').pop().toLowerCase();
@@ -1833,7 +1851,7 @@ async function buildHtmlArchive(data, selectedPerspective) {
             if (__htmlState.cancel) throw new Error('cancelled');
             const batch = refArr.slice(i, Math.min(i + BATCH, total));
             const promises = batch.map(fileName => {
-                const matchingFile = Object.keys(mediaFiles).find(f => f.toLowerCase().endsWith(fileName));
+                const matchingFile = findMediaFile(fileName);
                 if (!matchingFile || !mediaFiles[matchingFile]) return Promise.resolve(null);
                 const mType = mediaTypes[matchingFile] || getMediaType(fileName);
                 return blobUrlToDataUri(mediaFiles[matchingFile], mType, compressImages)
@@ -2097,7 +2115,7 @@ function collectAllMedia(messages) {
         mediaItems.forEach(media => {
             if (!media || !media.uri) return;
             const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
-            const matchingFile = Object.keys(mediaFiles).find(f => f.toLowerCase().endsWith(fileName));
+            const matchingFile = findMediaFile(fileName);
             const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
             const extension = fileName.split('.').pop().toLowerCase();
             const mediaType = extension === 'mp4' ? 'video' : (matchingFile ? mediaTypes[matchingFile] : getMediaType(fileName));
