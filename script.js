@@ -245,7 +245,6 @@ async function searchAllConversations(query) {
 
     let totalMatches = 0;
     let convsWithMatches = 0;
-    const MAX_PER_CONV = 5;
 
     for (const conv of __allConversations) {
         if (__convSearchAbort) return;
@@ -259,29 +258,24 @@ async function searchAllConversations(query) {
         }
 
         const matches = [];
-        let extraCount = 0;
         for (let i = 0; i < messages.length; i++) {
             const msg = messages[i];
             const text = String(msg.text || msg.content || '');
             if (!text) continue;
             if (normalizeForSearch(text).includes(qNorm)) {
-                if (matches.length < MAX_PER_CONV) {
-                    matches.push({
-                        msgIdx: i,
-                        text,
-                        sender: msg.senderName || msg.sender_name || 'Unknown',
-                        timestamp: msg.timestamp || msg.timestamp_ms || 0,
-                    });
-                } else {
-                    extraCount++;
-                }
+                matches.push({
+                    msgIdx: i,
+                    text,
+                    sender: msg.senderName || msg.sender_name || 'Unknown',
+                    timestamp: msg.timestamp || msg.timestamp_ms || 0,
+                });
             }
         }
 
         if (matches.length) {
             convsWithMatches++;
-            totalMatches += matches.length + extraCount;
-            convList.appendChild(buildConvSearchGroup(conv, matches, extraCount, query));
+            totalMatches += matches.length;
+            convList.appendChild(buildConvSearchGroup(conv, matches, query));
         }
 
         // Yield to UI after each conversation so results stream in visibly
@@ -308,7 +302,7 @@ function getMatchSnippet(text, qNorm, maxLen = 140) {
     return prefix + text.slice(start, end) + suffix;
 }
 
-function buildConvSearchGroup(conv, matches, extraCount, query) {
+function buildConvSearchGroup(conv, matches, query) {
     const qNorm = normalizeForSearch(query);
     const group = document.createElement('div');
     group.className = 'conv-search-group';
@@ -333,13 +327,6 @@ function buildConvSearchGroup(conv, matches, extraCount, query) {
         });
         group.appendChild(item);
     });
-
-    if (extraCount > 0) {
-        const more = document.createElement('div');
-        more.className = 'csr-more';
-        more.textContent = `\u2026\u00a0${extraCount} more match${extraCount !== 1 ? 'es' : ''} in this conversation`;
-        group.appendChild(more);
-    }
 
     return group;
 }
