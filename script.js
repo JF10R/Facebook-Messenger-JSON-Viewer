@@ -1969,7 +1969,7 @@ body{font-family:Arial,sans-serif;background:var(--bg);color:var(--text);margin:
 .from-them{background:var(--them-bg);color:var(--text);margin-right:auto}
 .sender-name{font-weight:bold;margin-bottom:4px;font-size:13px}
 .from-me .sender-name{color:var(--me-text)}
-.message-content{line-height:1.4;font-size:14px}
+.message-content{line-height:1.4;font-size:14px;white-space:pre-wrap}
 .from-me .message-content{color:var(--me-text)}
 .timestamp{font-size:11px;margin-top:4px;opacity:0.7}
 .from-me .timestamp{color:rgba(255,255,255,0.8)}
