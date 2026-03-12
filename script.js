@@ -72,6 +72,8 @@ async function handleZipUpload(file) {
         for (const [path, entry] of jsonEntries) {
             const text = await entry.async('string');
             const meta = parseConvMetadata(text, path);
+            // Pre-parse messages at load time to avoid re-parsing on every search
+            try { meta.parsedMessages = parseMessages(text); } catch (e) { meta.parsedMessages = null; }
             conversations.push(meta);
         }
 
@@ -251,7 +253,7 @@ async function searchAllConversations(query) {
 
         let messages;
         try {
-            messages = parseMessages(conv.jsonText);
+            messages = conv.parsedMessages || parseMessages(conv.jsonText);
         } catch (e) {
             await new Promise(r => setTimeout(r, 0));
             continue;
@@ -676,6 +678,8 @@ function resetMedia() {
     mediaFiles = {};
     mediaTypes = {};
     __mediaLookupCache = null;
+    __mediaItemsCache = null;
+    __mediaItemsCacheKey = null;
 }
 
 function getMediaType(filename) {
@@ -1849,12 +1853,13 @@ async function buildHtmlArchive(data, selectedPerspective) {
 
         const refArr = [...refs];
         const total = refArr.length;
+        const mediaLookup = getMediaLookupMap();
         const BATCH = 6;
         for (let i = 0; i < total; i += BATCH) {
             if (__htmlState.cancel) throw new Error('cancelled');
             const batch = refArr.slice(i, Math.min(i + BATCH, total));
             const promises = batch.map(fileName => {
-                const matchingFile = findMediaFile(fileName);
+                const matchingFile = mediaLookup.get(fileName.toLowerCase()) || null;
                 if (!matchingFile || !mediaFiles[matchingFile]) return Promise.resolve(null);
                 const mType = mediaTypes[matchingFile] || getMediaType(fileName);
                 return blobUrlToDataUri(mediaFiles[matchingFile], mType, compressImages, maxResolution, jpegQuality)
@@ -2124,7 +2129,14 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+let __mediaItemsCache = null;
+let __mediaItemsCacheKey = null;
+
 function collectAllMedia(messages) {
+    const cacheKey = messages.length;
+    if (__mediaItemsCache && __mediaItemsCacheKey === cacheKey) return __mediaItemsCache;
+
+    const mediaLookup = getMediaLookupMap();
     const items = [];
     messages.forEach((msg, msgIdx) => {
         const sender = msg.senderName || msg.sender_name || 'Unknown';
@@ -2133,13 +2145,16 @@ function collectAllMedia(messages) {
         mediaItems.forEach(media => {
             if (!media.uri) return;
             const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
-            const matchingFile = findMediaFile(fileName);
+            const matchingFile = mediaLookup.get(fileName) || null;
             const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
             const extension = fileName.split('.').pop().toLowerCase();
             const mediaType = extension === 'mp4' ? 'video' : (matchingFile ? mediaTypes[matchingFile] : getMediaType(fileName));
             items.push({ fileName, fileURL, mediaType, sender, timestamp, msgIdx });
         });
     });
+
+    __mediaItemsCache = items;
+    __mediaItemsCacheKey = cacheKey;
     return items;
 }
 
