@@ -1916,7 +1916,8 @@ async function buildHtmlArchive(data, selectedPerspective) {
 
         msgParts.push(`<div class="message ${fromMe ? 'from-me' : 'from-them'}">${senderHtml}<div class="message-content">${text}${mediaHtml}${reactionsHtml}${timeHtml}</div></div>`);
 
-        if (i % 500 === 0 && i > 0) {
+        if (i % 150 === 0 && i > 0) {
+            if (__htmlState.cancel) throw new Error('cancelled');
             htmlSetProgress(65 + (i / messages.length) * 25, `Rendering message ${i}/${messages.length}...`);
             await new Promise(r => setTimeout(r, 0));
         }
