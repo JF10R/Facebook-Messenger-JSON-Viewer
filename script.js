@@ -8,14 +8,19 @@ document.getElementById('zipInput')?.addEventListener('change', (e) => {
     e.target.value = ''; // allow re-selecting same file
 });
 
-// Conversation search
+// Conversation search (debounced)
+let __convSearchTimer = null;
 document.getElementById('convSearch')?.addEventListener('input', (e) => {
-    filterConvList(e.target.value);
+    clearTimeout(__convSearchTimer);
+    const val = e.target.value;
+    __convSearchTimer = setTimeout(() => filterConvList(val), 280);
 });
 
 // ZIP mode state
 let currentZip = null;
 let isZipMode = false;
+let __allConversations = []; // full list set after ZIP load
+let __convSearchAbort = false; // flag to cancel in-progress search
 
 // ------------------ ZIP upload & conversation sidebar ------------------
 
@@ -72,6 +77,7 @@ async function handleZipUpload(file) {
 
         // Sort by most recent message first
         conversations.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+        __allConversations = conversations;
 
         buildConvList(conversations);
 
@@ -182,14 +188,163 @@ function formatConvDate(timestamp) {
 }
 
 function filterConvList(query) {
-    const q = (query || '').toLowerCase().trim();
-    document.querySelectorAll('#conv-list .conv-item').forEach(item => {
-        const name = item.dataset.name || '';
-        item.style.display = !q || name.includes(q) ? '' : 'none';
-    });
+    const q = (query || '').trim();
+    if (!q) {
+        // Clear search: restore full conversation list
+        __convSearchAbort = true;
+        if (__allConversations.length) {
+            buildConvList(__allConversations);
+        } else {
+            // Single-JSON mode: no-op (no conv items to restore)
+        }
+        return;
+    }
+    if (__allConversations.length) {
+        // ZIP mode: full cross-conversation content search
+        searchAllConversations(q);
+    } else {
+        // Single-JSON fallback: simple name filter
+        const qLow = q.toLowerCase();
+        document.querySelectorAll('#conv-list .conv-item').forEach(item => {
+            item.style.display = (item.dataset.name || '').includes(qLow) ? '' : 'none';
+        });
+    }
 }
 
-function loadConversation(conv, itemEl) {
+// Parse messages from stored jsonText (same logic as processFileContent)
+function parseMessages(jsonText) {
+    const isTP = jsonText.includes('"thread_path"');
+    let data;
+    if (isTP) {
+        const replaced = jsonText.replace(/\\u00([a-f0-9]{2})|\\u([a-f0-9]{4})/gi, (m, p1, p2) =>
+            String.fromCharCode(p1 ? parseInt(p1, 16) : parseInt(p2, 16)));
+        data = JSON.parse(decodeURIComponent(escape(replaced)));
+        data.messages = data.messages.reverse(); // chronological, matches processFileContent
+    } else {
+        data = JSON.parse(jsonText);
+    }
+    return data.messages || [];
+}
+
+async function searchAllConversations(query) {
+    // Signal any running search to stop, then take the flag for ourselves
+    __convSearchAbort = true;
+    await new Promise(r => setTimeout(r, 0));
+    __convSearchAbort = false;
+
+    const qNorm = normalizeForSearch(query);
+    if (!qNorm) return;
+
+    const convList = document.getElementById('conv-list');
+    convList.innerHTML = '';
+
+    const status = document.createElement('div');
+    status.className = 'conv-search-status';
+    status.textContent = 'Searching\u2026';
+    convList.appendChild(status);
+
+    let totalMatches = 0;
+    let convsWithMatches = 0;
+    const MAX_PER_CONV = 5;
+
+    for (const conv of __allConversations) {
+        if (__convSearchAbort) return;
+
+        let messages;
+        try {
+            messages = parseMessages(conv.jsonText);
+        } catch (e) {
+            await new Promise(r => setTimeout(r, 0));
+            continue;
+        }
+
+        const matches = [];
+        let extraCount = 0;
+        for (let i = 0; i < messages.length; i++) {
+            const msg = messages[i];
+            const text = String(msg.text || msg.content || '');
+            if (!text) continue;
+            if (normalizeForSearch(text).includes(qNorm)) {
+                if (matches.length < MAX_PER_CONV) {
+                    matches.push({
+                        msgIdx: i,
+                        text,
+                        sender: msg.senderName || msg.sender_name || 'Unknown',
+                        timestamp: msg.timestamp || msg.timestamp_ms || 0,
+                    });
+                } else {
+                    extraCount++;
+                }
+            }
+        }
+
+        if (matches.length) {
+            convsWithMatches++;
+            totalMatches += matches.length + extraCount;
+            convList.appendChild(buildConvSearchGroup(conv, matches, extraCount, query));
+        }
+
+        // Yield to UI after each conversation so results stream in visibly
+        await new Promise(r => setTimeout(r, 0));
+        if (__convSearchAbort) return;
+
+        status.textContent = totalMatches
+            ? `${totalMatches} result${totalMatches !== 1 ? 's' : ''} in ${convsWithMatches} conversation${convsWithMatches !== 1 ? 's' : ''}\u2026`
+            : 'Searching\u2026';
+    }
+
+    status.textContent = totalMatches
+        ? `${totalMatches} result${totalMatches !== 1 ? 's' : ''} in ${convsWithMatches} conversation${convsWithMatches !== 1 ? 's' : ''}`
+        : 'No results found';
+}
+
+function getMatchSnippet(text, qNorm, maxLen = 140) {
+    const norm = normalizeForSearch(text);
+    const pos = norm.indexOf(qNorm);
+    const start = pos <= 40 ? 0 : pos - 40;
+    const end = Math.min(text.length, start + maxLen);
+    const prefix = start > 0 ? '\u2026' : '';
+    const suffix = end < text.length ? '\u2026' : '';
+    return prefix + text.slice(start, end) + suffix;
+}
+
+function buildConvSearchGroup(conv, matches, extraCount, query) {
+    const qNorm = normalizeForSearch(query);
+    const group = document.createElement('div');
+    group.className = 'conv-search-group';
+
+    const header = document.createElement('div');
+    header.className = 'conv-search-group-header';
+    header.textContent = conv.title;
+    group.appendChild(header);
+
+    matches.forEach(match => {
+        const item = document.createElement('div');
+        item.className = 'conv-search-result';
+
+        const snippet = getMatchSnippet(match.text, qNorm);
+        const highlighted = highlightText(snippet, query);
+        const date = new Date(match.timestamp).toLocaleDateString();
+
+        item.innerHTML = `<div class="csr-snippet">${highlighted}</div><div class="csr-meta">${escapeHtml(match.sender)}\u00a0\u00b7\u00a0${date}</div>`;
+
+        item.addEventListener('click', () => {
+            loadConversation(conv, null, () => jumpToMessage(match.msgIdx));
+        });
+        group.appendChild(item);
+    });
+
+    if (extraCount > 0) {
+        const more = document.createElement('div');
+        more.className = 'csr-more';
+        more.textContent = `\u2026\u00a0${extraCount} more match${extraCount !== 1 ? 'es' : ''} in this conversation`;
+        group.appendChild(more);
+    }
+
+    return group;
+}
+
+function loadConversation(conv, itemEl, afterLoad = null) {
     // Reset search state
     try { __searchIndex = null; } catch (e) {}
     try { if (searchInput) searchInput.value = ''; } catch (e) {}
@@ -202,7 +357,7 @@ function loadConversation(conv, itemEl) {
         }
     } catch (e) {}
 
-    // Mark active item
+    // Mark active item (conv-items may not be visible during search results view)
     document.querySelectorAll('#conv-list .conv-item').forEach(el => el.classList.remove('active'));
     if (itemEl) itemEl.classList.add('active');
 
@@ -212,6 +367,9 @@ function loadConversation(conv, itemEl) {
 
     // Load conversation via existing parser
     processFileContent(conv.jsonText);
+
+    // afterLoad fires after renderMessages' 100ms display timeout settles
+    if (afterLoad) setTimeout(afterLoad, 160);
 }
 
 let currentJsonFileName = null;
