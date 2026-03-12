@@ -32,7 +32,11 @@
             </div>
             <hr>
             <div class="settings">
-                <small>Select a Messenger JSON file to view</small>
+                <small>Open a full <strong>messages.zip</strong> export for the conversation sidebar</small>
+                <label class="zip-label-settings" for="zipInput">&#128194; Open messages.zip</label>
+                <input type="file" id="zipInput" accept=".zip" hidden>
+                <hr>
+                <small>Or select a single Messenger JSON file</small>
                 <input type="file" id="fileInput" accept=".json">
                 <hr>
                 <small>Allow access to MEDIA folder</small>
@@ -118,10 +122,21 @@
             </div>
         </div>
 
+        <!-- Conversation List Panel (ZIP mode) -->
+        <div id="conv-panel">
+            <div id="conv-header">
+                <span>Messages</span>
+                <label id="zipLabel" for="zipInput" title="Open a messages.zip export">&#128194; Open ZIP</label>
+            </div>
+            <input type="search" id="convSearch" placeholder="Search conversations&#8230;">
+            <div id="conv-list"></div>
+        </div>
+
         <!-- Chat Section -->
         <div class="chat-container">
             <h3>
                 Conversation: <span id="threadName">unknown</span>
+                <button id="mediaGalleryBtn" class="btn btn-secondary media-gallery-btn" title="Browse all media in this conversation" style="display:none">&#128247; Media</button>
             </h3>
             <div id="line"></div>
             <div id="chat"></div>
@@ -184,6 +199,32 @@
         </div>
     </div>
 
+    <!-- Media gallery modal -->
+    <div id="mediaModal" class="media-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="mediaModalTitle">
+        <div class="media-modal-backdrop" tabindex="-1"></div>
+        <div class="media-modal-card" role="document">
+            <header class="media-modal-header">
+                <h2 id="mediaModalTitle">Media</h2>
+                <div id="mediaModalStats" class="media-modal-stats"></div>
+                <button id="mediaModalClose" class="btn btn-secondary">&#x2715; Close</button>
+            </header>
+            <div id="mediaModalGrid" class="media-modal-grid"></div>
+        </div>
+    </div>
+
+    <!-- Lightbox -->
+    <div id="mediaLightbox" class="media-lightbox" aria-hidden="true">
+        <div class="media-lightbox-backdrop"></div>
+        <button class="media-lb-nav media-lb-close" id="mediaLbClose" aria-label="Close">&#x2715;</button>
+        <button class="media-lb-nav media-lb-prev" id="mediaLbPrev" aria-label="Previous">&#8249;</button>
+        <div class="media-lightbox-content">
+            <div class="media-lb-main" id="mediaLbMain"></div>
+            <div class="media-lb-caption" id="mediaLbCaption"></div>
+        </div>
+        <button class="media-lb-nav media-lb-next" id="mediaLbNext" aria-label="Next">&#8250;</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="script.js"></script>

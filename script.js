@@ -1,6 +1,219 @@
 // Handle file upload
 document.getElementById("fileInput").addEventListener("change", handleFileUpload);
 
+// ZIP upload
+document.getElementById('zipInput')?.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) handleZipUpload(file);
+    e.target.value = ''; // allow re-selecting same file
+});
+
+// Conversation search
+document.getElementById('convSearch')?.addEventListener('input', (e) => {
+    filterConvList(e.target.value);
+});
+
+// ZIP mode state
+let currentZip = null;
+let isZipMode = false;
+
+// ------------------ ZIP upload & conversation sidebar ------------------
+
+async function handleZipUpload(file) {
+    if (!file) return;
+    if (!window.JSZip) {
+        alert('JSZip library not loaded. Check your internet connection.');
+        return;
+    }
+
+    const loading = document.getElementById('loading');
+    const chatContainer = document.getElementById('chat');
+    const convList = document.getElementById('conv-list');
+    const container = document.querySelector('.container');
+
+    // Enter ZIP mode
+    isZipMode = true;
+    if (container) container.classList.add('zip-mode');
+
+    if (convList) convList.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">Loading conversations\u2026</div>';
+    loading.innerHTML = 'Reading ZIP\u2026';
+    loading.style.display = 'flex';
+    chatContainer.style.display = 'none';
+    chatContainer.innerHTML = '';
+
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        currentZip = zip;
+
+        // Load all media entries first
+        loading.innerHTML = 'Loading media\u2026';
+        await loadMediaFromZip(zip);
+
+        // Find root-level JSON files (not inside subfolders)
+        loading.innerHTML = 'Parsing conversations\u2026';
+        const jsonEntries = Object.entries(zip.files).filter(([path, entry]) =>
+            !entry.dir && path.endsWith('.json') && !path.includes('/')
+        );
+
+        if (!jsonEntries.length) {
+            loading.innerHTML = 'No JSON files found in ZIP root. Make sure this is a Facebook messages export.';
+            loading.style.display = 'flex';
+            return;
+        }
+
+        // Parse metadata for each conversation
+        const conversations = [];
+        for (const [path, entry] of jsonEntries) {
+            const text = await entry.async('string');
+            const meta = parseConvMetadata(text, path);
+            conversations.push(meta);
+        }
+
+        // Sort by most recent message first
+        conversations.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+
+        buildConvList(conversations);
+
+        loading.innerHTML = 'Select a conversation from the list';
+        loading.style.display = 'flex';
+
+    } catch (err) {
+        console.error('ZIP error:', err);
+        loading.innerHTML = 'Error reading ZIP: ' + escapeHtml(String(err.message || err));
+        loading.style.display = 'flex';
+    }
+}
+
+async function loadMediaFromZip(zip) {
+    // Reset any previously loaded media before populating from ZIP
+    resetMedia();
+
+    const mediaEntries = Object.entries(zip.files).filter(([path, entry]) =>
+        !entry.dir && path.toLowerCase().startsWith('media/')
+    );
+
+    const BATCH = 10;
+    for (let i = 0; i < mediaEntries.length; i += BATCH) {
+        const batch = mediaEntries.slice(i, i + BATCH);
+        await Promise.all(batch.map(async ([path, entry]) => {
+            try {
+                const blob = await entry.async('blob');
+                const url = URL.createObjectURL(blob);
+                const fileName = path.split('/').pop().toLowerCase();
+                mediaFiles[fileName] = url;
+                mediaTypes[fileName] = getMediaType(fileName);
+            } catch (e) { /* skip broken entries */ }
+        }));
+        // yield to UI periodically
+        await new Promise(r => setTimeout(r, 0));
+    }
+}
+
+function parseConvMetadata(jsonText, filename) {
+    try {
+        const isThreadPath = jsonText.includes('"thread_path"');
+        let data;
+        if (isThreadPath) {
+            const replaced = jsonText.replace(/\\u00([a-f0-9]{2})|\\u([a-f0-9]{4})/gi, (match, p1, p2) => {
+                const code = p1 ? parseInt(p1, 16) : parseInt(p2, 16);
+                return String.fromCharCode(code);
+            });
+            data = JSON.parse(decodeURIComponent(escape(replaced)));
+        } else {
+            data = JSON.parse(jsonText);
+        }
+
+        const messages = data.messages || [];
+        const title = data.threadName || data.title || data.threadPath || filename.replace(/\.json$/i, '');
+
+        // thread_path format stores newest message at index 0 (processFileContent reverses them)
+        // other format stores newest at messages[length-1]
+        const lastMsg = isThreadPath ? messages[0] : messages[messages.length - 1];
+        const lastTimestamp = lastMsg ? (lastMsg.timestamp || lastMsg.timestamp_ms || 0) : 0;
+        const lastText = lastMsg ? (lastMsg.text || lastMsg.content || '') : '';
+        const preview = lastText ? String(lastText).slice(0, 60) : (lastMsg ? '[Media]' : '');
+
+        return { title, lastTimestamp, preview, messageCount: messages.length, filename, jsonText };
+    } catch (e) {
+        return { title: filename.replace(/\.json$/i, ''), lastTimestamp: 0, preview: '', messageCount: 0, filename, jsonText };
+    }
+}
+
+function buildConvList(conversations) {
+    const convList = document.getElementById('conv-list');
+    if (!convList) return;
+    convList.innerHTML = '';
+
+    if (!conversations.length) {
+        convList.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">No conversations found</div>';
+        return;
+    }
+
+    conversations.forEach(conv => {
+        const item = document.createElement('div');
+        item.className = 'conv-item';
+        item.dataset.name = (conv.title || '').toLowerCase();
+
+        const initial = escapeHtml((conv.title || '?').charAt(0).toUpperCase());
+        const date = conv.lastTimestamp ? formatConvDate(conv.lastTimestamp) : '';
+
+        item.innerHTML = `
+            <div class="conv-avatar">${initial}</div>
+            <div class="conv-meta">
+                <div class="conv-name">${escapeHtml(conv.title)}</div>
+                <div class="conv-preview">${escapeHtml(conv.preview)}</div>
+            </div>
+            <div class="conv-date">${escapeHtml(date)}</div>
+        `;
+
+        item.addEventListener('click', () => loadConversation(conv, item));
+        convList.appendChild(item);
+    });
+}
+
+function formatConvDate(timestamp) {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffDays = Math.floor((now - date) / 86400000);
+    if (diffDays === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' });
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function filterConvList(query) {
+    const q = (query || '').toLowerCase().trim();
+    document.querySelectorAll('#conv-list .conv-item').forEach(item => {
+        const name = item.dataset.name || '';
+        item.style.display = !q || name.includes(q) ? '' : 'none';
+    });
+}
+
+function loadConversation(conv, itemEl) {
+    // Reset search state
+    try { __searchIndex = null; } catch (e) {}
+    try { if (searchInput) searchInput.value = ''; } catch (e) {}
+    try { if (searchResultsEl) { searchResultsEl.innerHTML = ''; searchResultsEl.style.display = 'none'; } } catch (e) {}
+    try {
+        if (searchProgress) {
+            searchProgress.querySelector('.fill').style.width = '0%';
+            searchProgress.querySelector('.progress-text').innerText = 'Idle';
+            searchProgress.style.display = 'none';
+        }
+    } catch (e) {}
+
+    // Mark active item
+    document.querySelectorAll('#conv-list .conv-item').forEach(el => el.classList.remove('active'));
+    if (itemEl) itemEl.classList.add('active');
+
+    // Show options panel
+    const options = document.getElementsByClassName('options')[0];
+    if (options) options.style.display = 'block';
+
+    // Load conversation via existing parser
+    processFileContent(conv.jsonText);
+}
+
 let currentJsonFileName = null;
 let currentJsonFileSize = null;
 let currentJsonFileModified = null;
@@ -132,6 +345,11 @@ function setupChatInterface(data) {
     const threadName = data.threadName || data.title || data.threadPath || "Untitled";
 
     document.getElementById("threadName").innerText = threadName;
+
+    // Show the media gallery button now that a conversation is loaded
+    const mgBtn = document.getElementById('mediaGalleryBtn');
+    if (mgBtn) mgBtn.style.display = '';
+
     setupRadioButtons(participants);
 
     // after building radios, determine selected
@@ -1349,3 +1567,215 @@ document.addEventListener('keydown', (e) => {
         closePdfModal();
     }
 });
+
+// ------------------ Media Gallery ------------------
+
+const mediaGalleryBtn = document.getElementById('mediaGalleryBtn');
+const mediaModal = document.getElementById('mediaModal');
+const mediaModalClose = document.getElementById('mediaModalClose');
+const mediaModalGrid = document.getElementById('mediaModalGrid');
+const mediaModalStats = document.getElementById('mediaModalStats');
+const mediaLightbox = document.getElementById('mediaLightbox');
+const mediaLbMain = document.getElementById('mediaLbMain');
+const mediaLbCaption = document.getElementById('mediaLbCaption');
+
+let __galleryItems = [];
+let __lbIndex = 0;
+
+mediaGalleryBtn?.addEventListener('click', openMediaGallery);
+mediaModalClose?.addEventListener('click', closeMediaModal);
+document.querySelector('.media-modal-backdrop')?.addEventListener('click', closeMediaModal);
+document.getElementById('mediaLbClose')?.addEventListener('click', closeLightbox);
+document.querySelector('.media-lightbox-backdrop')?.addEventListener('click', closeLightbox);
+document.getElementById('mediaLbPrev')?.addEventListener('click', () => moveLightbox(-1));
+document.getElementById('mediaLbNext')?.addEventListener('click', () => moveLightbox(1));
+
+document.addEventListener('keydown', (e) => {
+    if (mediaLightbox && mediaLightbox.getAttribute('aria-hidden') === 'false') {
+        if (e.key === 'ArrowLeft') moveLightbox(-1);
+        if (e.key === 'ArrowRight') moveLightbox(1);
+        if (e.key === 'Escape') { closeLightbox(); return; }
+    }
+    if (mediaModal && mediaModal.getAttribute('aria-hidden') === 'false' && e.key === 'Escape') {
+        closeMediaModal();
+    }
+});
+
+function collectAllMedia(messages) {
+    const items = [];
+    messages.forEach(msg => {
+        const sender = msg.senderName || msg.sender_name || 'Unknown';
+        const timestamp = msg.timestamp || msg.timestamp_ms || 0;
+        const mediaItems = [].concat(
+            msg.media || [],
+            msg.photos || [],
+            msg.videos || [],
+            msg.audio || [],
+            msg.audio_files || [],
+            msg.gifs || []
+        );
+        mediaItems.forEach(media => {
+            if (!media || !media.uri) return;
+            const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
+            const matchingFile = Object.keys(mediaFiles).find(f => f.toLowerCase().endsWith(fileName));
+            const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
+            const extension = fileName.split('.').pop().toLowerCase();
+            const mediaType = extension === 'mp4' ? 'video' : (matchingFile ? mediaTypes[matchingFile] : getMediaType(fileName));
+            items.push({ fileName, fileURL, mediaType, sender, timestamp });
+        });
+    });
+    return items;
+}
+
+function openMediaGallery() {
+    if (!window.currentChatData) return;
+    const items = collectAllMedia(window.currentChatData.messages || []);
+    __galleryItems = items;
+
+    const found = items.filter(i => i.fileURL).length;
+    if (mediaModalStats) {
+        mediaModalStats.textContent = `${items.length} item${items.length !== 1 ? 's' : ''} · ${found} available · ${items.length - found} not found`;
+    }
+
+    mediaModalGrid.innerHTML = '';
+
+    if (!items.length) {
+        mediaModalGrid.innerHTML = '<div style="padding:20px;color:var(--muted)">No media in this conversation.</div>';
+    } else {
+        const frag = document.createDocumentFragment();
+        items.forEach((item, idx) => {
+            const thumb = document.createElement('div');
+            thumb.className = 'media-thumb';
+
+            if (item.fileURL && item.mediaType === 'image') {
+                const img = document.createElement('img');
+                img.src = item.fileURL;
+                img.alt = item.fileName;
+                img.loading = 'lazy';
+                const overlay = buildThumbOverlay(item);
+                thumb.appendChild(img);
+                thumb.appendChild(overlay);
+                thumb.addEventListener('click', () => openLightbox(idx));
+
+            } else if (item.fileURL && item.mediaType === 'video') {
+                const video = document.createElement('video');
+                video.src = item.fileURL;
+                video.preload = 'metadata';
+                const icon = document.createElement('div');
+                icon.className = 'media-thumb-type';
+                icon.textContent = '▶';
+                const overlay = buildThumbOverlay(item);
+                thumb.appendChild(video);
+                thumb.appendChild(icon);
+                thumb.appendChild(overlay);
+                thumb.addEventListener('click', () => openLightbox(idx));
+
+            } else if (item.fileURL && item.mediaType === 'audio') {
+                const inner = document.createElement('div');
+                inner.className = 'media-thumb-audio';
+                inner.innerHTML = `<span style="font-size:28px">🎵</span><span>${escapeHtml(item.fileName)}</span>`;
+                thumb.appendChild(inner);
+                thumb.addEventListener('click', () => openLightbox(idx));
+
+            } else {
+                const inner = document.createElement('div');
+                inner.className = 'media-thumb-notfound';
+                inner.innerHTML = `<span style="font-size:24px">📎</span><span>${escapeHtml(item.fileName)}</span><span>Not found</span>`;
+                thumb.appendChild(inner);
+            }
+
+            frag.appendChild(thumb);
+        });
+        mediaModalGrid.appendChild(frag);
+    }
+
+    mediaModal.setAttribute('aria-hidden', 'false');
+}
+
+function buildThumbOverlay(item) {
+    const overlay = document.createElement('div');
+    overlay.className = 'media-thumb-overlay';
+    const info = document.createElement('div');
+    info.className = 'media-thumb-info';
+    info.textContent = `${item.sender}\n${new Date(item.timestamp).toLocaleDateString()}`;
+    info.style.whiteSpace = 'pre-line';
+    overlay.appendChild(info);
+    return overlay;
+}
+
+function closeMediaModal() {
+    if (mediaModal) mediaModal.setAttribute('aria-hidden', 'true');
+}
+
+function openLightbox(idx) {
+    __lbIndex = idx;
+    renderLightboxItem();
+    if (mediaLightbox) mediaLightbox.setAttribute('aria-hidden', 'false');
+}
+
+function closeLightbox() {
+    if (mediaLightbox) mediaLightbox.setAttribute('aria-hidden', 'true');
+    // stop any playing media
+    mediaLbMain.querySelectorAll('video, audio').forEach(el => { try { el.pause(); el.currentTime = 0; } catch(e){} });
+    mediaLbMain.innerHTML = '';
+}
+
+function moveLightbox(dir) {
+    // find next item that has a fileURL in the given direction
+    let next = __lbIndex + dir;
+    while (next >= 0 && next < __galleryItems.length && !__galleryItems[next].fileURL) {
+        next += dir;
+    }
+    if (next >= 0 && next < __galleryItems.length && __galleryItems[next].fileURL) {
+        __lbIndex = next;
+        renderLightboxItem();
+    }
+}
+
+function renderLightboxItem() {
+    const item = __galleryItems[__lbIndex];
+    if (!item) return;
+
+    // stop previous media
+    mediaLbMain.querySelectorAll('video, audio').forEach(el => { try { el.pause(); } catch(e){} });
+    mediaLbMain.innerHTML = '';
+
+    if (item.mediaType === 'image' && item.fileURL) {
+        const img = document.createElement('img');
+        img.src = item.fileURL;
+        img.alt = item.fileName;
+        mediaLbMain.appendChild(img);
+
+    } else if (item.mediaType === 'video' && item.fileURL) {
+        const video = document.createElement('video');
+        video.src = item.fileURL;
+        video.controls = true;
+        video.autoplay = true;
+        mediaLbMain.appendChild(video);
+
+    } else if (item.mediaType === 'audio' && item.fileURL) {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;color:#fff';
+        wrap.innerHTML = `<span style="font-size:48px">🎵</span><span style="font-size:13px;opacity:.7">${escapeHtml(item.fileName)}</span>`;
+        const audio = document.createElement('audio');
+        audio.src = item.fileURL;
+        audio.controls = true;
+        audio.autoplay = true;
+        wrap.appendChild(audio);
+        mediaLbMain.appendChild(wrap);
+    }
+
+    // update prev/next button visibility
+    const hasPrev = __galleryItems.slice(0, __lbIndex).some(i => i.fileURL);
+    const hasNext = __galleryItems.slice(__lbIndex + 1).some(i => i.fileURL);
+    const prevBtn = document.getElementById('mediaLbPrev');
+    const nextBtn = document.getElementById('mediaLbNext');
+    if (prevBtn) prevBtn.style.opacity = hasPrev ? '1' : '0.2';
+    if (nextBtn) nextBtn.style.opacity = hasNext ? '1' : '0.2';
+
+    const available = __galleryItems.filter(i => i.fileURL).length;
+    const position = __galleryItems.slice(0, __lbIndex + 1).filter(i => i.fileURL).length;
+    if (mediaLbCaption) {
+        mediaLbCaption.textContent = `${item.sender} · ${new Date(item.timestamp).toLocaleString()} · ${position}/${available}`;
+    }
+}
