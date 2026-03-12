@@ -2150,20 +2150,21 @@ let __galleryObserver = null;
 
 function openMediaGallery() {
     if (!window.currentChatData) return;
-    const items = collectAllMedia(window.currentChatData.messages || []);
-    __galleryItems = items;
+    const allItems = collectAllMedia(window.currentChatData.messages || []);
+    const notFoundCount = allItems.filter(i => !i.fileURL).length;
+    __galleryItems = allItems.filter(i => i.fileURL);
     __galleryRenderedCount = 0;
 
-    const found = items.filter(i => i.fileURL).length;
     if (mediaModalStats) {
-        mediaModalStats.textContent = `${items.length} item${items.length !== 1 ? 's' : ''} · ${found} available · ${items.length - found} not found`;
+        const extra = notFoundCount > 0 ? ' · ' + notFoundCount + ' not found' : '';
+        mediaModalStats.textContent = __galleryItems.length + ' available' + extra;
     }
 
     if (__galleryObserver) { __galleryObserver.disconnect(); __galleryObserver = null; }
     __gallerySentinel = null;
     mediaModalGrid.innerHTML = '';
 
-    if (!items.length) {
+    if (!__galleryItems.length) {
         mediaModalGrid.innerHTML = '<div style="padding:20px;color:var(--muted)">No media in this conversation.</div>';
         mediaModal.setAttribute('aria-hidden', 'false');
         return;
