@@ -451,7 +451,9 @@ h3 { display:flex; align-items:center; gap:10px; }
 .media-lb-main { display:flex; align-items:center; justify-content:center; max-width:85vw; max-height:80vh; }
 .media-lb-main img { max-width:100%; max-height:80vh; border-radius:6px; object-fit:contain; display:block; }
 .media-lb-main video, .media-lb-main audio { max-width:85vw; max-height:75vh; border-radius:6px; }
-.media-lb-caption { color:rgba(255,255,255,0.65); font-size:12px; margin-top:10px; text-align:center; }
+.media-lb-caption { color:rgba(255,255,255,0.65); font-size:12px; margin-top:10px; text-align:center; display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap; }
+.media-lb-goto { background:rgba(255,255,255,0.15); border:none; color:#fff; padding:5px 12px; border-radius:6px; cursor:pointer; font-size:12px; transition:background .15s; }
+.media-lb-goto:hover { background:rgba(255,255,255,0.28); }
 .media-lb-nav { position:fixed; background:rgba(255,255,255,0.12); border:none; color:#fff; cursor:pointer; border-radius:8px; display:flex; align-items:center; justify-content:center; transition:background .15s; z-index:5200; }
 .media-lb-nav:hover { background:rgba(255,255,255,0.25); }
 .media-lb-close { top:14px; right:16px; width:38px; height:38px; font-size:18px; border-radius:50%; }
