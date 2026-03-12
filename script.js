@@ -786,7 +786,8 @@ function highlightText(original, query) {
 function createMessageHTML(msg, highlightQuery) {
     const sender = msg.senderName || msg.sender_name || "Unknown";
     const rawText = msg.text || msg.content || "";
-    const text = highlightQuery ? highlightText(String(rawText), highlightQuery) : escapeHtml(String(rawText));
+    const escaped = highlightQuery ? highlightText(String(rawText), highlightQuery) : escapeHtml(String(rawText));
+    const text = escaped.replace(/\n/g, '<br>');
     const timestamp = msg.timestamp || msg.timestamp_ms || 0;
     const mediaItems = getMessageMedia(msg);
 
@@ -1892,7 +1893,7 @@ async function buildHtmlArchive(data, selectedPerspective) {
         const sender = msg.senderName || msg.sender_name || 'Unknown';
         const fromMe = sender === selectedPerspective;
         const rawText = msg.text || msg.content || '';
-        const text = escapeHtml(String(rawText));
+        const text = escapeHtml(String(rawText)).replace(/\n/g, '<br>');
         const timestamp = msg.timestamp || msg.timestamp_ms || 0;
 
         const mediaItems = getMessageMedia(msg);
@@ -1969,7 +1970,7 @@ body{font-family:Arial,sans-serif;background:var(--bg);color:var(--text);margin:
 .from-them{background:var(--them-bg);color:var(--text);margin-right:auto}
 .sender-name{font-weight:bold;margin-bottom:4px;font-size:13px}
 .from-me .sender-name{color:var(--me-text)}
-.message-content{line-height:1.4;font-size:14px;white-space:pre-wrap}
+.message-content{line-height:1.4;font-size:14px}
 .from-me .message-content{color:var(--me-text)}
 .timestamp{font-size:11px;margin-top:4px;opacity:0.7}
 .from-me .timestamp{color:rgba(255,255,255,0.8)}
