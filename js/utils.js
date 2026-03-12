@@ -47,9 +47,11 @@ function decodeMessengerJson(text) {
     if (!text.includes('"thread_path"')) {
         return { data: JSON.parse(text), isThreadPath: false };
     }
-    const replaced = text.replace(/\\u00([a-f0-9]{2})|\\u([a-f0-9]{4})/gi, (m, p1, p2) =>
-        String.fromCharCode(p1 ? parseInt(p1, 16) : parseInt(p2, 16)));
-    return { data: JSON.parse(decodeURIComponent(escape(replaced))), isThreadPath: true };
+    // Facebook encodes each UTF-8 byte as \u00XX. Convert to actual bytes then decode as UTF-8.
+    const replaced = text.replace(/\\u00([a-f0-9]{2})/gi, (_, hex) =>
+        String.fromCharCode(parseInt(hex, 16)));
+    const bytes = Uint8Array.from(replaced, c => c.charCodeAt(0));
+    return { data: JSON.parse(new TextDecoder('utf-8').decode(bytes)), isThreadPath: true };
 }
 
 /** Extract lowercased filename + extension from a media URI */

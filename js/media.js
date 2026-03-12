@@ -56,12 +56,15 @@ async function processMediaFiles(files) {
     const fileArray = Array.from(files);
     resetMedia();
     for (let i = 0; i < fileArray.length; i += BATCH_SIZE) {
-        await Promise.all(fileArray.slice(i, i + BATCH_SIZE).map(file => {
-            const url = URL.createObjectURL(file);
-            const path = file.webkitRelativePath || file.name;
-            mediaFiles[path] = url;
-            mediaTypes[path] = getMediaType(file.name);
-        }));
+        for (const file of fileArray.slice(i, i + BATCH_SIZE)) {
+            try {
+                const url = URL.createObjectURL(file);
+                const path = file.webkitRelativePath || file.name;
+                mediaFiles[path] = url;
+                mediaTypes[path] = getMediaType(file.name);
+            } catch (e) { /* skip unreadable files */ }
+        }
+        await yieldToUi();
     }
     console.log('Media files processed:', Object.keys(mediaFiles).length);
 }

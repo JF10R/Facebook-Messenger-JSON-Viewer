@@ -40,9 +40,16 @@ document.addEventListener('keydown', (e) => {
 
 // ── media collection ──
 
+function makeGalleryCacheKey(messages) {
+    if (!messages.length) return '0';
+    const t0 = messages[0].timestamp || messages[0].timestamp_ms || 0;
+    const tN = messages[messages.length - 1].timestamp || messages[messages.length - 1].timestamp_ms || 0;
+    return `${messages.length}:${t0}:${tN}`;
+}
+
 function collectAllMedia(messages) {
-    // Cache by message-count; sufficient since messages don't change within a loaded conversation
-    if (__mediaItemsCache && __mediaItemsCacheKey === messages.length) return __mediaItemsCache;
+    const cacheKey = makeGalleryCacheKey(messages);
+    if (__mediaItemsCache && __mediaItemsCacheKey === cacheKey) return __mediaItemsCache;
 
     const mediaLookup = getMediaLookupMap();
     const items = [];
@@ -60,7 +67,7 @@ function collectAllMedia(messages) {
     });
 
     __mediaItemsCache = items;
-    __mediaItemsCacheKey = messages.length;
+    __mediaItemsCacheKey = cacheKey;
     return items;
 }
 

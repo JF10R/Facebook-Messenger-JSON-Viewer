@@ -12,6 +12,11 @@ if (searchResultsEl) searchResultsEl.style.display = 'none';
 let __searchIndex = null;
 let _highlightTimeout = null;
 
+function resetSearchState() {
+    __searchIndex = null;
+    clearSearch();
+}
+
 // ── event listeners ──
 searchBtn?.addEventListener('click', startSearch);
 searchInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') startSearch(); });
@@ -23,7 +28,7 @@ searchInput?.addEventListener('input', () => {
         const q = (searchInput.value || '').trim();
         if (!q && searchResultsEl) searchResultsEl.style.display = 'none';
         updateHighlightsAcrossDOM(q);
-    }, 250);
+    }, 500);
 });
 
 // ── highlight helpers ──
@@ -92,7 +97,6 @@ function buildSearchIndex(messages) {
         const sender = getSenderName(m);
         parts.push(sender);
         if (m.reactions?.length) parts.push(m.reactions.map(r => r.reaction + ' ' + (r.actor || '')).join(' '));
-        getMessageMedia(m).forEach(mi => { if (mi?.uri) parts.push(mi.uri); });
         const text = parts.join(' ');
         return { text, normalized: normalizeForSearch(text), sender, timestamp: m.timestamp || m.timestamp_ms || 0, idx: i };
     });
@@ -155,24 +159,24 @@ async function startSearch() {
 
     if (!__searchIndex) {
         searchProgress.style.display = 'flex';
-        searchProgress.querySelector('.progress-text').innerText = 'Indexing...';
+        searchProgress.querySelector('.progress-text').textContent = 'Indexing...';
         await yieldToUi();
         __searchIndex = buildSearchIndex(window.currentChatData.messages);
     }
 
     searchProgress.style.display = 'flex';
     searchProgress.querySelector('.fill').style.width = '0%';
-    searchProgress.querySelector('.progress-text').innerText = 'Searching...';
+    searchProgress.querySelector('.progress-text').textContent = 'Searching...';
     searchResultsEl.innerHTML = '';
     if (searchResultsEl) searchResultsEl.style.display = 'block';
 
     const results = await performSearch(q, __searchIndex, (p) => {
         searchProgress.querySelector('.fill').style.width = p + '%';
-        searchProgress.querySelector('.progress-text').innerText = `Searching ${p}%`;
+        searchProgress.querySelector('.progress-text').textContent = `Searching ${p}%`;
     });
 
     searchProgress.querySelector('.fill').style.width = '100%';
-    searchProgress.querySelector('.progress-text').innerText = `Found ${results.length} matches`;
+    searchProgress.querySelector('.progress-text').textContent = `Found ${results.length} matches`;
     setTimeout(() => { searchProgress.style.display = 'none'; }, 800);
 
     if (!results.length) {
@@ -201,7 +205,7 @@ function clearSearch() {
     if (searchResultsEl) { searchResultsEl.innerHTML = ''; searchResultsEl.style.display = 'none'; }
     if (searchProgress) {
         searchProgress.querySelector('.fill').style.width = '0%';
-        searchProgress.querySelector('.progress-text').innerText = 'Idle';
+        searchProgress.querySelector('.progress-text').textContent = 'Idle';
         searchProgress.style.display = 'none';
     }
     updateHighlightsAcrossDOM('');
@@ -248,7 +252,16 @@ async function scrollAndHighlight(el) {
 // ── live highlight across rendered DOM ──
 
 function updateHighlightsAcrossDOM(query) {
+    const chat = document.getElementById('chat');
+    const chatRect = chat?.getBoundingClientRect();
+
     document.querySelectorAll('.message').forEach(el => {
+        // Skip messages outside the visible chat area + 300px buffer
+        if (chatRect) {
+            const rect = el.getBoundingClientRect();
+            if (rect.bottom < chatRect.top - 300 || rect.top > chatRect.bottom + 300) return;
+        }
+
         const contentEl = el.querySelector('.message-content');
         if (!contentEl) return;
 

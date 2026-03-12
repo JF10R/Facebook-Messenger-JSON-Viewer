@@ -5,7 +5,7 @@
 let currentZip = null;
 let isZipMode = false;
 let __allConversations = [];
-let __convSearchAbort = false;
+let __convSearchGen = 0;
 let __convSearchTimer = null;
 
 // ── event listeners ──
@@ -49,11 +49,12 @@ async function handleZipUpload(file) {
 
         loading.innerHTML = 'Parsing conversations\u2026';
         const jsonEntries = Object.entries(zip.files).filter(([path, entry]) =>
-            !entry.dir && path.endsWith('.json') && !path.includes('/')
+            !entry.dir && path.endsWith('.json') &&
+            (!path.includes('/') || /\/message_\d+\.json$/i.test(path))
         );
 
         if (!jsonEntries.length) {
-            loading.innerHTML = 'No JSON files found in ZIP root. Make sure this is a Facebook messages export.';
+            loading.innerHTML = 'No JSON files found. Make sure this is a Facebook messages export (expects message_N.json files).';
             loading.style.display = 'flex';
             return;
         }
@@ -120,7 +121,7 @@ function parseConvMetadata(jsonText, filename) {
 
 function parseMessages(jsonText) {
     const { data, isThreadPath } = decodeMessengerJson(jsonText);
-    if (isThreadPath) data.messages = data.messages.reverse();
+    if (isThreadPath) data.messages = [...data.messages].reverse();
     return data.messages || [];
 }
 
@@ -158,7 +159,7 @@ function buildConvList(conversations) {
 function filterConvList(query) {
     const q = (query || '').trim();
     if (!q) {
-        __convSearchAbort = true;
+        __convSearchGen++;
         if (__allConversations.length) buildConvList(__allConversations);
         return;
     }
@@ -173,17 +174,7 @@ function filterConvList(query) {
 }
 
 function loadConversation(conv, itemEl, afterLoad = null) {
-    // Reset in-conversation search state
-    try { __searchIndex = null; } catch (e) {}
-    try { if (searchInput) searchInput.value = ''; } catch (e) {}
-    try { if (searchResultsEl) { searchResultsEl.innerHTML = ''; searchResultsEl.style.display = 'none'; } } catch (e) {}
-    try {
-        if (searchProgress) {
-            searchProgress.querySelector('.fill').style.width = '0%';
-            searchProgress.querySelector('.progress-text').innerText = 'Idle';
-            searchProgress.style.display = 'none';
-        }
-    } catch (e) {}
+    try { resetSearchState(); } catch (e) {}
 
     document.querySelectorAll('#conv-list .conv-item').forEach(el => el.classList.remove('active'));
     if (itemEl) itemEl.classList.add('active');
@@ -198,9 +189,9 @@ function loadConversation(conv, itemEl, afterLoad = null) {
 // ── cross-conversation content search ──
 
 async function searchAllConversations(query) {
-    __convSearchAbort = true;
+    const myGen = ++__convSearchGen;
     await yieldToUi();
-    __convSearchAbort = false;
+    if (myGen !== __convSearchGen) return;
 
     const qNorm = normalizeForSearch(query);
     if (!qNorm) return;
@@ -217,7 +208,7 @@ async function searchAllConversations(query) {
     let convsWithMatches = 0;
 
     for (const conv of __allConversations) {
-        if (__convSearchAbort) return;
+        if (myGen !== __convSearchGen) return;
 
         let messages;
         try {
@@ -248,7 +239,7 @@ async function searchAllConversations(query) {
         }
 
         await yieldToUi();
-        if (__convSearchAbort) return;
+        if (myGen !== __convSearchGen) return;
 
         const countLabel = totalMatches
             ? `${totalMatches} result${totalMatches !== 1 ? 's' : ''} in ${convsWithMatches} conversation${convsWithMatches !== 1 ? 's' : ''}\u2026`

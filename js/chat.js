@@ -24,16 +24,7 @@ function handleFileUpload(event) {
         currentJsonFileSize !== file.size ||
         currentJsonFileModified !== file.lastModified
     )) {
-        try { __searchIndex = null; } catch (e) {}
-        try { if (searchInput) searchInput.value = ''; } catch (e) {}
-        try { if (searchResultsEl) searchResultsEl.innerHTML = ''; } catch (e) {}
-        try {
-            if (searchProgress) {
-                searchProgress.querySelector('.fill').style.width = '0%';
-                searchProgress.querySelector('.progress-text').innerText = 'Idle';
-                searchProgress.style.display = 'none';
-            }
-        } catch (e) {}
+        try { resetSearchState(); } catch (e) {}
     }
 
     currentJsonFileName = file.name;
@@ -58,7 +49,7 @@ function handleFileUpload(event) {
 function processFileContent(content) {
     try {
         const { data, isThreadPath } = decodeMessengerJson(content);
-        if (isThreadPath) data.messages = data.messages.reverse();
+        if (isThreadPath) data.messages = [...data.messages].reverse();
         setupChatInterface(data);
     } catch (error) {
         alert('Invalid JSON file!');
@@ -72,7 +63,7 @@ function setupChatInterface(data) {
     const participants = data.participants.map(p => (typeof p === 'string' ? p : p.name));
     const threadName = data.threadName || data.title || data.threadPath || 'Untitled';
 
-    document.getElementById('threadName').innerText = threadName;
+    document.getElementById('threadName').textContent = threadName;
 
     const mgBtn = document.getElementById('mediaGalleryBtn');
     if (mgBtn) mgBtn.style.display = '';
@@ -217,6 +208,7 @@ function createMessageHTML(msg, highlightQuery) {
         <div class="message-content">
             ${text}
             ${mediaItems.map(media => {
+                if (!media?.uri) return '';
                 const { fileName, ext } = parseMediaFileName(media.uri);
                 const matchingFile = findMediaFile(fileName);
                 const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
@@ -248,7 +240,7 @@ function createMessageHTML(msg, highlightQuery) {
 // ── cleanup on page unload ──
 window.addEventListener('beforeunload', () => {
     if (observer) observer.disconnect();
-    Object.values(mediaFiles).forEach(url => URL.revokeObjectURL(url));
+    resetMedia();
     renderedMessages.clear();
     try { if (window.__pdfState?.blobUrl) URL.revokeObjectURL(window.__pdfState.blobUrl); } catch (e) {}
 });

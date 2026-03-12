@@ -38,7 +38,7 @@ document.addEventListener('keydown', (e) => {
 function pdfSetProgress(percent, text) {
     try {
         if (typeof percent === 'number' && pdfProgressFill) pdfProgressFill.style.width = Math.max(0, Math.min(100, percent)) + '%';
-        if (pdfStatus && text) pdfStatus.innerText = text;
+        if (pdfStatus && text) pdfStatus.textContent = text;
     } catch (e) {}
 }
 
@@ -79,7 +79,12 @@ function openPdfModal() {
 
 function closePdfModal() {
     if (!pdfModal) return;
-    if (__pdfState.running) { __pdfState.cancel = true; pdfSetProgress(0, 'Cancelling...'); return; }
+    if (__pdfState.running) {
+        __pdfState.cancel = true;
+        pdfSetProgress(0, 'Cancelling...');
+        // Modal will close once the export loop detects the cancel flag and finishes
+        return;
+    }
     pdfModal.setAttribute('aria-hidden', 'true');
     pdfResetUi();
 }
@@ -291,7 +296,12 @@ async function startPdfExport() {
         pdfSetReadyState();
         pdfSetProgress(100, 'Ready. Preview below.');
     } catch (e) {
-        pdfSetProgress(0, String(e?.message) === 'cancelled' ? 'Cancelled.' : 'Failed to export PDF.');
+        if (String(e?.message) === 'cancelled') {
+            pdfModal.setAttribute('aria-hidden', 'true');
+            pdfResetUi();
+        } else {
+            pdfSetProgress(0, 'Failed to export PDF.');
+        }
     } finally {
         __pdfState.running = false;
         __pdfState.cancel  = false;
