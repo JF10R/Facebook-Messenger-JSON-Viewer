@@ -610,8 +610,8 @@ function renderMessages(data, selectedValue) {
         });
     }, {
         root: chatContainer,
-        threshold: 0.1,
-        rootMargin: "200px"
+        threshold: 0.25,
+        rootMargin: "100px"
     });
 
     document.querySelectorAll(".message-chunk").forEach(chunk => {
@@ -727,8 +727,8 @@ function buildNormalizedMap(original) {
     return { normalized: normalized.toLowerCase(), mapping };
 }
 
-function findRangesForToken(original, tokenNorm) {
-    const { normalized, mapping } = buildNormalizedMap(original);
+function findRangesForToken(original, tokenNorm, prebuiltMap) {
+    const { normalized, mapping } = prebuiltMap || buildNormalizedMap(original);
     const token = tokenNorm;
     const ranges = [];
     let start = 0;
@@ -763,9 +763,10 @@ function highlightText(original, query) {
     const tokens = qNorm.split(' ').filter(Boolean);
     if (!tokens.length) return escapeHtml(original);
 
+    const normalizedMap = buildNormalizedMap(original);
     let allRanges = [];
     for (const t of tokens) {
-        const ranges = findRangesForToken(original, t);
+        const ranges = findRangesForToken(original, t, normalizedMap);
         allRanges = allRanges.concat(ranges);
     }
     if (!allRanges.length) return escapeHtml(original);
@@ -892,12 +893,16 @@ function fuzzyScore(query, target) {
     }
     const tokenScore = overlap * 10;
 
-    // small Levenshtein distance for short tokens (cheap implementation)
+    // Levenshtein distance using single-row DP (O(n) space, no 2D array alloc)
     function lev(a,b){
-        const m=a.length,n=b.length; if(m*n===0) return m+n; const dp = Array(m+1).fill(0).map(()=>Array(n+1).fill(0));
-        for(let i=0;i<=m;i++) dp[i][0]=i; for(let j=0;j<=n;j++) dp[0][j]=j;
-        for(let i=1;i<=m;i++) for(let j=1;j<=n;j++) dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+1);
-        return dp[m][n];
+        const m=a.length,n=b.length; if(m*n===0) return m+n;
+        let prev = Array(n+1); for(let j=0;j<=n;j++) prev[j]=j;
+        for(let i=1;i<=m;i++){
+            let cur = Array(n+1); cur[0]=i;
+            for(let j=1;j<=n;j++) cur[j]=a[i-1]===b[j-1]?prev[j-1]:Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+1);
+            prev=cur;
+        }
+        return prev[n];
     }
 
     const shortQuery = query.length > 30 ? query.slice(0,30) : query;
