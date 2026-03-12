@@ -1627,6 +1627,8 @@ function collectAllMedia(messages) {
     return items;
 }
 
+let __galleryObserver = null;
+
 function openMediaGallery() {
     if (!window.currentChatData) return;
     const items = collectAllMedia(window.currentChatData.messages || []);
@@ -1637,57 +1639,81 @@ function openMediaGallery() {
         mediaModalStats.textContent = `${items.length} item${items.length !== 1 ? 's' : ''} · ${found} available · ${items.length - found} not found`;
     }
 
+    // Disconnect any previous observer
+    if (__galleryObserver) { __galleryObserver.disconnect(); __galleryObserver = null; }
+
     mediaModalGrid.innerHTML = '';
 
     if (!items.length) {
         mediaModalGrid.innerHTML = '<div style="padding:20px;color:var(--muted)">No media in this conversation.</div>';
-    } else {
-        const frag = document.createDocumentFragment();
-        items.forEach((item, idx) => {
-            const thumb = document.createElement('div');
-            thumb.className = 'media-thumb';
-
-            if (item.fileURL && item.mediaType === 'image') {
-                const img = document.createElement('img');
-                img.src = item.fileURL;
-                img.alt = item.fileName;
-                img.loading = 'lazy';
-                const overlay = buildThumbOverlay(item);
-                thumb.appendChild(img);
-                thumb.appendChild(overlay);
-                thumb.addEventListener('click', () => openLightbox(idx));
-
-            } else if (item.fileURL && item.mediaType === 'video') {
-                const video = document.createElement('video');
-                video.src = item.fileURL;
-                video.preload = 'metadata';
-                const icon = document.createElement('div');
-                icon.className = 'media-thumb-type';
-                icon.textContent = '▶';
-                const overlay = buildThumbOverlay(item);
-                thumb.appendChild(video);
-                thumb.appendChild(icon);
-                thumb.appendChild(overlay);
-                thumb.addEventListener('click', () => openLightbox(idx));
-
-            } else if (item.fileURL && item.mediaType === 'audio') {
-                const inner = document.createElement('div');
-                inner.className = 'media-thumb-audio';
-                inner.innerHTML = `<span style="font-size:28px">🎵</span><span>${escapeHtml(item.fileName)}</span>`;
-                thumb.appendChild(inner);
-                thumb.addEventListener('click', () => openLightbox(idx));
-
-            } else {
-                const inner = document.createElement('div');
-                inner.className = 'media-thumb-notfound';
-                inner.innerHTML = `<span style="font-size:24px">📎</span><span>${escapeHtml(item.fileName)}</span><span>Not found</span>`;
-                thumb.appendChild(inner);
-            }
-
-            frag.appendChild(thumb);
-        });
-        mediaModalGrid.appendChild(frag);
+        mediaModal.setAttribute('aria-hidden', 'false');
+        return;
     }
+
+    // IntersectionObserver: reveal image src only when thumbnail enters viewport
+    __galleryObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (!entry.isIntersecting) return;
+            const thumb = entry.target;
+            const img = thumb.querySelector('img[data-src]');
+            if (img) {
+                img.src = img.dataset.src;
+                delete img.dataset.src;
+            }
+            __galleryObserver.unobserve(thumb);
+        });
+    }, { root: mediaModalGrid, rootMargin: '200px', threshold: 0 });
+
+    const frag = document.createDocumentFragment();
+    items.forEach((item, idx) => {
+        const thumb = document.createElement('div');
+        thumb.className = 'media-thumb';
+
+        if (item.fileURL && item.mediaType === 'image') {
+            // Deferred: src set by IntersectionObserver
+            const img = document.createElement('img');
+            img.dataset.src = item.fileURL;
+            img.alt = item.fileName;
+            img.className = 'thumb-img-lazy';
+            thumb.appendChild(img);
+            thumb.appendChild(buildThumbOverlay(item));
+            thumb.addEventListener('click', () => openLightbox(idx));
+            // observe after appended to DOM (done below)
+            thumb.dataset.observe = '1';
+
+        } else if (item.fileURL && item.mediaType === 'video') {
+            // Static play-icon placeholder — no <video> element at thumbnail stage
+            const icon = document.createElement('div');
+            icon.className = 'media-thumb-video-icon';
+            icon.innerHTML = `<span class="thumb-play">&#9654;</span><span class="thumb-label">${escapeHtml(item.fileName)}</span>`;
+            thumb.appendChild(icon);
+            thumb.appendChild(buildThumbOverlay(item));
+            thumb.addEventListener('click', () => openLightbox(idx));
+
+        } else if (item.fileURL && item.mediaType === 'audio') {
+            const inner = document.createElement('div');
+            inner.className = 'media-thumb-audio';
+            inner.innerHTML = `<span style="font-size:28px">&#127925;</span><span>${escapeHtml(item.fileName)}</span>`;
+            thumb.appendChild(inner);
+            thumb.addEventListener('click', () => openLightbox(idx));
+
+        } else {
+            const inner = document.createElement('div');
+            inner.className = 'media-thumb-notfound';
+            inner.innerHTML = `<span style="font-size:24px">&#128206;</span><span>${escapeHtml(item.fileName)}</span><span>Not found</span>`;
+            thumb.appendChild(inner);
+        }
+
+        frag.appendChild(thumb);
+    });
+
+    mediaModalGrid.appendChild(frag);
+
+    // Observe all image thumbs now that they're in the DOM
+    mediaModalGrid.querySelectorAll('[data-observe]').forEach(thumb => {
+        __galleryObserver.observe(thumb);
+        delete thumb.dataset.observe;
+    });
 
     mediaModal.setAttribute('aria-hidden', 'false');
 }
@@ -1705,6 +1731,7 @@ function buildThumbOverlay(item) {
 
 function closeMediaModal() {
     if (mediaModal) mediaModal.setAttribute('aria-hidden', 'true');
+    if (__galleryObserver) { __galleryObserver.disconnect(); __galleryObserver = null; }
 }
 
 function openLightbox(idx) {
