@@ -58,9 +58,10 @@ async function processMediaFiles(files) {
     for (let i = 0; i < fileArray.length; i += BATCH_SIZE) {
         for (const file of fileArray.slice(i, i + BATCH_SIZE)) {
             try {
-                const url = URL.createObjectURL(file);
                 const path = file.webkitRelativePath || file.name;
-                mediaFiles[path] = url;
+                const mimeType = file.type || getMimeTypeStr(file.name);
+                const src = (mimeType && !file.type) ? new Blob([file], { type: mimeType }) : file;
+                mediaFiles[path] = URL.createObjectURL(src);
                 mediaTypes[path] = getMediaType(file.name);
             } catch (e) { /* skip unreadable files */ }
         }

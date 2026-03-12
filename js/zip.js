@@ -90,10 +90,11 @@ async function loadMediaFromZip(zip) {
     for (let i = 0; i < mediaEntries.length; i += BATCH) {
         await Promise.all(mediaEntries.slice(i, i + BATCH).map(async ([path, entry]) => {
             try {
-                const blob = await entry.async('blob');
-                const url = URL.createObjectURL(blob);
                 const fileName = path.split('/').pop().toLowerCase();
-                mediaFiles[fileName] = url;
+                const mimeType = getMimeTypeStr(fileName);
+                const rawBlob = await entry.async('blob');
+                const blob = mimeType ? new Blob([rawBlob], { type: mimeType }) : rawBlob;
+                mediaFiles[fileName] = URL.createObjectURL(blob);
                 mediaTypes[fileName] = getMediaType(fileName);
             } catch (e) { /* skip broken entries */ }
         }));

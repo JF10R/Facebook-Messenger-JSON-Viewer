@@ -71,6 +71,17 @@ function getMessageText(msg) {
     return String(msg.text || msg.content || '');
 }
 
+/** Return a proper MIME type string for a filename, based on its extension */
+function getMimeTypeStr(filename) {
+    const ext = (filename || '').split('.').pop().toLowerCase();
+    return {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+        gif: 'image/gif',  webp: 'image/webp',
+        mp4: 'video/mp4',  webm: 'video/webm', ogg: 'video/ogg',
+        mp3: 'audio/mpeg', wav: 'audio/wav',   aac: 'audio/aac', m4a: 'audio/mp4',
+    }[ext] || '';
+}
+
 async function yieldToUi() {
     await new Promise(r => setTimeout(r, 0));
 }
