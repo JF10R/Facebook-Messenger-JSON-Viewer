@@ -1713,6 +1713,335 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// ------------------ HTML Archive Export ------------------
+
+const __htmlState = { running: false, cancel: false, blobUrl: null, fileName: null };
+
+const htmlModal = document.getElementById('htmlModal');
+const htmlBackdrop = document.querySelector('.html-backdrop');
+const htmlCancelBtn = document.getElementById('htmlCancelBtn');
+const htmlDownloadBtn = document.getElementById('htmlDownloadBtn');
+const htmlCloseBtn = document.getElementById('htmlCloseBtn');
+const exportHtmlBtn = document.getElementById('exportHtmlBtn');
+
+function openHtmlModal() {
+    if (htmlModal) htmlModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeHtmlModal() {
+    if (__htmlState.running) {
+        __htmlState.cancel = true;
+    }
+    if (htmlModal) htmlModal.setAttribute('aria-hidden', 'true');
+    if (__htmlState.blobUrl) { URL.revokeObjectURL(__htmlState.blobUrl); __htmlState.blobUrl = null; }
+    __htmlState.running = false;
+    __htmlState.cancel = false;
+    if (htmlDownloadBtn) htmlDownloadBtn.disabled = true;
+}
+
+function htmlSetProgress(pct, text) {
+    const fill = document.getElementById('htmlProgressFill');
+    const status = document.getElementById('htmlStatus');
+    if (fill) fill.style.width = Math.min(100, Math.max(0, pct)) + '%';
+    if (status) status.textContent = text || '';
+}
+
+function htmlSetSize(text) {
+    const el = document.getElementById('htmlSizeEstimate');
+    if (el) el.textContent = text || '';
+}
+
+/** Convert a blob URL to a base64 data URI, optionally compressing images */
+async function blobUrlToDataUri(blobUrl, mType, compress) {
+    const resp = await fetch(blobUrl);
+    const blob = await resp.blob();
+
+    if (compress && mType === 'image' && blob.size > 0) {
+        try {
+            const dataUri = await compressImageBlob(blob);
+            if (dataUri) return dataUri;
+        } catch (_) { /* fall through to raw base64 */ }
+    }
+
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+/** Compress an image blob via canvas — max 800px, JPEG q=0.65 */
+function compressImageBlob(blob) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(blob);
+        img.onload = () => {
+            const MAX = 800;
+            let { width: w, height: h } = img;
+            if (w > MAX || h > MAX) {
+                const scale = MAX / Math.max(w, h);
+                w = Math.round(w * scale);
+                h = Math.round(h * scale);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            const dataUri = canvas.toDataURL('image/jpeg', 0.65);
+            URL.revokeObjectURL(url);
+            resolve(dataUri);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        img.src = url;
+    });
+}
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+async function buildHtmlArchive(data, selectedPerspective) {
+    const threadName = data.threadName || data.title || data.threadPath || 'Untitled';
+    const messages = Array.isArray(data.messages) ? data.messages : [];
+    const compressImages = !!document.getElementById('htmlCompressImages')?.checked;
+    const includeMedia = !!document.getElementById('htmlIncludeMedia')?.checked;
+
+    const showMyName = !!document.getElementById('showMyName')?.checked;
+    const showTheirName = !!document.getElementById('showTheirName')?.checked;
+    const showTime = !!document.getElementById('showTime')?.checked;
+    const showReacts = !!document.getElementById('showReacts')?.checked;
+
+    // Phase 1: Collect unique media references and convert to data URIs
+    const mediaMap = new Map(); // fileName → dataUri
+    if (includeMedia) {
+        const refs = new Set();
+        for (const msg of messages) {
+            const items = [].concat(msg.media || [], msg.photos || [], msg.videos || [], msg.audio || [], msg.audio_files || [], msg.gifs || []);
+            for (const item of items) {
+                if (item?.uri) refs.add(item.uri.split(/[\\\/]/).pop().toLowerCase());
+            }
+        }
+
+        const refArr = [...refs];
+        const total = refArr.length;
+        for (let i = 0; i < total; i++) {
+            if (__htmlState.cancel) throw new Error('cancelled');
+            const fileName = refArr[i];
+            const matchingFile = Object.keys(mediaFiles).find(f => f.toLowerCase().endsWith(fileName));
+            if (!matchingFile || !mediaFiles[matchingFile]) continue;
+            const mType = mediaTypes[matchingFile] || getMediaType(fileName);
+            htmlSetProgress(((i + 1) / total) * 60, `Converting media ${i + 1}/${total}: ${fileName}`);
+            try {
+                const dataUri = await blobUrlToDataUri(mediaFiles[matchingFile], mType, compressImages);
+                mediaMap.set(fileName, dataUri);
+            } catch (_) { /* skip failed media */ }
+            if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
+        }
+    }
+
+    if (__htmlState.cancel) throw new Error('cancelled');
+    htmlSetProgress(65, 'Building HTML...');
+    await new Promise(r => setTimeout(r, 0));
+
+    // Phase 2: Build message HTML
+    const msgParts = [];
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        const sender = msg.senderName || msg.sender_name || 'Unknown';
+        const fromMe = sender === selectedPerspective;
+        const rawText = msg.text || msg.content || '';
+        const text = escapeHtml(String(rawText));
+        const timestamp = msg.timestamp || msg.timestamp_ms || 0;
+
+        const mediaItems = [].concat(msg.media || [], msg.photos || [], msg.videos || [], msg.audio || [], msg.audio_files || [], msg.gifs || []);
+        let mediaHtml = '';
+        for (const media of mediaItems) {
+            if (!media?.uri) continue;
+            const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase();
+            const dataUri = mediaMap.get(fileName);
+            const ext = fileName.split('.').pop().toLowerCase();
+            const mType = ext === 'mp4' ? 'video' : getMediaType(fileName);
+
+            if (!dataUri) {
+                mediaHtml += `<span class="media-missing">[Media: ${escapeHtml(fileName)}]</span>`;
+                continue;
+            }
+            if (mType === 'image') {
+                mediaHtml += `<img src="${dataUri}" alt="Image" loading="lazy">`;
+            } else if (mType === 'video') {
+                mediaHtml += `<video controls preload="metadata"><source src="${dataUri}" type="video/mp4"></video>`;
+            } else if (mType === 'audio') {
+                mediaHtml += `<audio controls preload="metadata"><source src="${dataUri}" type="audio/mpeg"></audio>`;
+            }
+        }
+
+        const reactionsHtml = (showReacts && msg.reactions?.length)
+            ? `<div class="reaction">${msg.reactions.map(r => `${escapeHtml(r.actor)}: ${escapeHtml(r.reaction)}`).join(', ')}</div>`
+            : '';
+
+        const senderVisible = fromMe ? showMyName : showTheirName;
+        const senderHtml = senderVisible ? `<div class="sender-name">${escapeHtml(sender)}</div>` : '';
+        const timeHtml = showTime ? `<div class="timestamp" style="display:block">${new Date(timestamp).toLocaleString()}</div>` : '';
+
+        msgParts.push(`<div class="message ${fromMe ? 'from-me' : 'from-them'}">${senderHtml}<div class="message-content">${text}${mediaHtml}${reactionsHtml}${timeHtml}</div></div>`);
+
+        if (i % 500 === 0 && i > 0) {
+            htmlSetProgress(65 + (i / messages.length) * 25, `Rendering message ${i}/${messages.length}...`);
+            await new Promise(r => setTimeout(r, 0));
+        }
+    }
+
+    if (__htmlState.cancel) throw new Error('cancelled');
+    htmlSetProgress(92, 'Assembling archive...');
+    await new Promise(r => setTimeout(r, 0));
+
+    // Phase 3: Assemble standalone HTML
+    const isDark = document.documentElement.classList.contains('dark');
+    const html = buildStandaloneHtml(threadName, msgParts.join('\n'), isDark);
+    return html;
+}
+
+function buildStandaloneHtml(threadName, messagesHtml, isDark) {
+    const safeTitle = escapeHtml(threadName);
+    const exportDate = new Date().toLocaleString();
+    return `<!DOCTYPE html>
+<html lang="en"${isDark ? ' class="dark"' : ''}>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${safeTitle} — Messenger Export</title>
+<style>
+:root{--bg:#fff;--panel-bg:#f6f8fb;--text:#111213;--muted:#6b6f76;--accent:#0084ff;--me-bg:#0084ff;--me-text:#fff;--them-bg:#e9eef8;--border:#e6e9ee}
+.dark{--bg:#0b1116;--panel-bg:#0f161b;--text:#e6eef8;--muted:#9aa4b2;--accent:#3ea6ff;--me-bg:#1667d6;--me-text:#f7fbff;--them-bg:#0f2a3a;--border:#1b2330}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding:0}
+.archive-header{position:sticky;top:0;z-index:10;background:var(--panel-bg);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;justify-content:space-between}
+.archive-header h1{font-size:16px;margin:0}
+.archive-meta{font-size:12px;color:var(--muted)}
+.theme-toggle{background:var(--them-bg);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+.chat{max-width:800px;margin:0 auto;padding:16px}
+.message{margin:4px 8px;padding:10px 15px;border-radius:15px;max-width:65%;width:fit-content;word-break:break-word}
+.from-me{background:var(--me-bg);color:var(--me-text);margin-left:auto}
+.from-them{background:var(--them-bg);color:var(--text);margin-right:auto}
+.sender-name{font-weight:bold;margin-bottom:4px;font-size:13px}
+.from-me .sender-name{color:var(--me-text)}
+.message-content{line-height:1.4;font-size:14px}
+.from-me .message-content{color:var(--me-text)}
+.timestamp{font-size:11px;margin-top:4px;opacity:0.7}
+.from-me .timestamp{color:rgba(255,255,255,0.8)}
+.from-them .timestamp{color:var(--muted)}
+.reaction{font-size:13px;margin-top:4px;text-align:right;opacity:0.8}
+img,video{max-width:100%;border-radius:8px;margin:4px 0;display:block}
+audio{margin:4px 0;max-width:100%}
+.media-missing{display:inline-block;padding:4px 8px;background:var(--border);border-radius:4px;font-size:12px;color:var(--muted);margin:2px 0}
+*::-webkit-scrollbar{width:10px}
+*::-webkit-scrollbar-thumb{background:var(--muted);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+</style>
+</head>
+<body>
+<div class="archive-header">
+<div><h1>${escapeHtml(threadName)}</h1><div class="archive-meta">Exported ${escapeHtml(exportDate)} &middot; Facebook Messenger JSON Viewer</div></div>
+<button class="theme-toggle" onclick="document.documentElement.classList.toggle('dark');this.textContent=document.documentElement.classList.contains('dark')?'Light mode':'Dark mode'">${isDark ? 'Light mode' : 'Dark mode'}</button>
+</div>
+<div class="chat">
+${messagesHtml}
+</div>
+</body>
+</html>`;
+}
+
+async function startHtmlExport() {
+    const data = window.currentChatData;
+    if (!data || !data.messages?.length) {
+        alert('No conversation loaded to export.');
+        return;
+    }
+
+    openHtmlModal();
+    __htmlState.cancel = false;
+    __htmlState.running = true;
+    if (__htmlState.blobUrl) { URL.revokeObjectURL(__htmlState.blobUrl); __htmlState.blobUrl = null; }
+    if (htmlDownloadBtn) htmlDownloadBtn.disabled = true;
+    if (htmlCancelBtn) htmlCancelBtn.disabled = false;
+    htmlSetProgress(0, 'Starting...');
+    htmlSetSize('');
+
+    const perspective = getSelectedPerspective();
+
+    try {
+        const html = await buildHtmlArchive(data, perspective);
+        if (__htmlState.cancel) throw new Error('cancelled');
+
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const threadName = data.threadName || data.title || data.threadPath || 'Untitled';
+        const safeName = threadName.replace(/[^a-zA-Z0-9_\- ]/g, '').trim().slice(0, 60) || 'conversation';
+
+        __htmlState.blobUrl = url;
+        __htmlState.fileName = `${safeName}.html`;
+        __htmlState.running = false;
+
+        htmlSetProgress(100, 'Ready to download');
+        htmlSetSize(`File size: ${formatBytes(blob.size)}`);
+        if (htmlDownloadBtn) htmlDownloadBtn.disabled = false;
+        if (htmlCancelBtn) htmlCancelBtn.disabled = true;
+    } catch (err) {
+        __htmlState.running = false;
+        if (err.message === 'cancelled') {
+            htmlSetProgress(0, 'Cancelled');
+        } else {
+            console.error('HTML export error:', err);
+            htmlSetProgress(0, 'Error: ' + String(err.message || err));
+        }
+    }
+}
+
+function downloadHtmlArchive() {
+    if (!__htmlState.blobUrl || !__htmlState.fileName) return;
+    const a = document.createElement('a');
+    a.href = __htmlState.blobUrl;
+    a.download = __htmlState.fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+}
+
+exportHtmlBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    startHtmlExport();
+});
+
+htmlCancelBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (__htmlState.running) {
+        __htmlState.cancel = true;
+        if (htmlCancelBtn) htmlCancelBtn.disabled = true;
+        htmlSetProgress(0, 'Cancelling...');
+    }
+});
+
+htmlDownloadBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    downloadHtmlArchive();
+});
+
+htmlCloseBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    closeHtmlModal();
+});
+
+htmlBackdrop?.addEventListener('click', () => closeHtmlModal());
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && htmlModal && htmlModal.getAttribute('aria-hidden') === 'false') {
+        closeHtmlModal();
+    }
+});
+
 // ------------------ Media Gallery ------------------
 
 const mediaGalleryBtn = document.getElementById('mediaGalleryBtn');
@@ -1772,21 +2101,24 @@ function collectAllMedia(messages) {
     return items;
 }
 
+const GALLERY_BATCH = 30;
+let __galleryRenderedCount = 0;
+let __gallerySentinel = null;
 let __galleryObserver = null;
 
 function openMediaGallery() {
     if (!window.currentChatData) return;
     const items = collectAllMedia(window.currentChatData.messages || []);
     __galleryItems = items;
+    __galleryRenderedCount = 0;
 
     const found = items.filter(i => i.fileURL).length;
     if (mediaModalStats) {
         mediaModalStats.textContent = `${items.length} item${items.length !== 1 ? 's' : ''} · ${found} available · ${items.length - found} not found`;
     }
 
-    // Disconnect any previous observer
     if (__galleryObserver) { __galleryObserver.disconnect(); __galleryObserver = null; }
-
+    __gallerySentinel = null;
     mediaModalGrid.innerHTML = '';
 
     if (!items.length) {
@@ -1795,72 +2127,79 @@ function openMediaGallery() {
         return;
     }
 
-    // IntersectionObserver: reveal image src only when thumbnail enters viewport
+    // Sentinel sits at the end; when it enters view the next batch is appended
+    __gallerySentinel = document.createElement('div');
+    __gallerySentinel.style.cssText = 'height:1px; grid-column:1/-1;';
+    mediaModalGrid.appendChild(__gallerySentinel);
+
     __galleryObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (!entry.isIntersecting) return;
-            const thumb = entry.target;
-            const img = thumb.querySelector('img[data-src]');
-            if (img) {
-                img.src = img.dataset.src;
-                delete img.dataset.src;
-            }
-            __galleryObserver.unobserve(thumb);
-        });
-    }, { root: mediaModalGrid, rootMargin: '200px', threshold: 0 });
+        if (entries[0].isIntersecting) renderGalleryBatch();
+    }, { root: mediaModalGrid, rootMargin: '400px' });
+    __galleryObserver.observe(__gallerySentinel);
+
+    renderGalleryBatch(); // paint the first screenful immediately
+    mediaModal.setAttribute('aria-hidden', 'false');
+}
+
+function renderGalleryBatch() {
+    const start = __galleryRenderedCount;
+    const end = Math.min(start + GALLERY_BATCH, __galleryItems.length);
+    if (start >= __galleryItems.length) return;
 
     const frag = document.createDocumentFragment();
-    items.forEach((item, idx) => {
-        const thumb = document.createElement('div');
-        thumb.className = 'media-thumb';
+    for (let i = start; i < end; i++) {
+        frag.appendChild(buildGalleryThumb(__galleryItems[i], i));
+    }
 
-        if (item.fileURL && item.mediaType === 'image') {
-            // Deferred: src set by IntersectionObserver
-            const img = document.createElement('img');
-            img.dataset.src = item.fileURL;
-            img.alt = item.fileName;
-            img.className = 'thumb-img-lazy';
-            thumb.appendChild(img);
-            thumb.appendChild(buildThumbOverlay(item));
-            thumb.addEventListener('click', () => openLightbox(idx));
-            // observe after appended to DOM (done below)
-            thumb.dataset.observe = '1';
+    // Insert before sentinel so it stays at the bottom
+    if (__gallerySentinel && __gallerySentinel.parentNode) {
+        mediaModalGrid.insertBefore(frag, __gallerySentinel);
+    } else {
+        mediaModalGrid.appendChild(frag);
+    }
+    __galleryRenderedCount = end;
 
-        } else if (item.fileURL && item.mediaType === 'video') {
-            // Static play-icon placeholder — no <video> element at thumbnail stage
-            const icon = document.createElement('div');
-            icon.className = 'media-thumb-video-icon';
-            icon.innerHTML = `<span class="thumb-play">&#9654;</span><span class="thumb-label">${escapeHtml(item.fileName)}</span>`;
-            thumb.appendChild(icon);
-            thumb.appendChild(buildThumbOverlay(item));
-            thumb.addEventListener('click', () => openLightbox(idx));
+    if (__galleryRenderedCount >= __galleryItems.length) {
+        if (__galleryObserver) { __galleryObserver.disconnect(); __galleryObserver = null; }
+        if (__gallerySentinel) { __gallerySentinel.remove(); __gallerySentinel = null; }
+    }
+}
 
-        } else if (item.fileURL && item.mediaType === 'audio') {
-            const inner = document.createElement('div');
-            inner.className = 'media-thumb-audio';
-            inner.innerHTML = `<span style="font-size:28px">&#127925;</span><span>${escapeHtml(item.fileName)}</span>`;
-            thumb.appendChild(inner);
-            thumb.addEventListener('click', () => openLightbox(idx));
+function buildGalleryThumb(item, idx) {
+    const thumb = document.createElement('div');
+    thumb.className = 'media-thumb';
 
-        } else {
-            const inner = document.createElement('div');
-            inner.className = 'media-thumb-notfound';
-            inner.innerHTML = `<span style="font-size:24px">&#128206;</span><span>${escapeHtml(item.fileName)}</span><span>Not found</span>`;
-            thumb.appendChild(inner);
-        }
+    if (item.fileURL && item.mediaType === 'image') {
+        const img = document.createElement('img');
+        img.src = item.fileURL; // direct — only GALLERY_BATCH images decoded at once
+        img.alt = item.fileName;
+        thumb.appendChild(img);
+        thumb.appendChild(buildThumbOverlay(item));
+        thumb.addEventListener('click', () => openLightbox(idx));
 
-        frag.appendChild(thumb);
-    });
+    } else if (item.fileURL && item.mediaType === 'video') {
+        const icon = document.createElement('div');
+        icon.className = 'media-thumb-video-icon';
+        icon.innerHTML = `<span class="thumb-play">&#9654;</span><span class="thumb-label">${escapeHtml(item.fileName)}</span>`;
+        thumb.appendChild(icon);
+        thumb.appendChild(buildThumbOverlay(item));
+        thumb.addEventListener('click', () => openLightbox(idx));
 
-    mediaModalGrid.appendChild(frag);
+    } else if (item.fileURL && item.mediaType === 'audio') {
+        const inner = document.createElement('div');
+        inner.className = 'media-thumb-audio';
+        inner.innerHTML = `<span style="font-size:28px">&#127925;</span><span>${escapeHtml(item.fileName)}</span>`;
+        thumb.appendChild(inner);
+        thumb.addEventListener('click', () => openLightbox(idx));
 
-    // Observe all image thumbs now that they're in the DOM
-    mediaModalGrid.querySelectorAll('[data-observe]').forEach(thumb => {
-        __galleryObserver.observe(thumb);
-        delete thumb.dataset.observe;
-    });
+    } else {
+        const inner = document.createElement('div');
+        inner.className = 'media-thumb-notfound';
+        inner.innerHTML = `<span style="font-size:24px">&#128206;</span><span>${escapeHtml(item.fileName)}</span><span>Not found</span>`;
+        thumb.appendChild(inner);
+    }
 
-    mediaModal.setAttribute('aria-hidden', 'false');
+    return thumb;
 }
 
 function buildThumbOverlay(item) {
@@ -1877,6 +2216,8 @@ function buildThumbOverlay(item) {
 function closeMediaModal() {
     if (mediaModal) mediaModal.setAttribute('aria-hidden', 'true');
     if (__galleryObserver) { __galleryObserver.disconnect(); __galleryObserver = null; }
+    if (__gallerySentinel) { __gallerySentinel.remove(); __gallerySentinel = null; }
+    __galleryRenderedCount = 0;
 }
 
 function openLightbox(idx) {

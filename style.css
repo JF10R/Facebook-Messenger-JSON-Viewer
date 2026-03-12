@@ -418,30 +418,15 @@ h3 { display:flex; align-items:center; gap:10px; }
 .media-modal-header { display:flex; align-items:center; gap:12px; flex-shrink:0; }
 .media-modal-header h2 { margin:0; font-size:17px; }
 .media-modal-stats { font-size:13px; color:var(--muted); flex:1; }
-.media-modal-grid { flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:6px; align-content:start; }
+.media-modal-grid { flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); grid-auto-rows:130px; gap:6px; align-content:start; }
 
-/* Thumbnails */
-/* Each cell is a fixed square; the img is absolutely positioned inside so it
-   never pushes the cell taller than its width (aspect-ratio alone isn't enough
-   in a grid when content is taller than the cell). */
-.media-thumb { position:relative; aspect-ratio:1; border-radius:8px; overflow:hidden; cursor:pointer; background:var(--border); }
-.media-thumb img {
-    position:absolute; inset:0;
-    width:100%; height:100%;
-    object-fit:cover; display:block;
-    transition:transform .2s; pointer-events:none;
-}
+/* Thumbnails — grid-auto-rows:130px gives each cell an explicit height,
+   the img fills it with object-fit:cover. No aspect-ratio needed. */
+.media-thumb { position:relative; width:100%; height:100%; border-radius:8px; overflow:hidden; cursor:pointer; background:var(--border); }
+.media-thumb img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; transition:transform .2s; pointer-events:none; }
 .media-thumb:hover img { transform:scale(1.06); }
 
-/* Skeleton pulse while image src hasn't loaded yet */
-.thumb-img-lazy:not([src]) {
-    position:absolute; inset:0;
-    background: linear-gradient(90deg, var(--border) 25%, var(--panel-bg) 50%, var(--border) 75%);
-    background-size:200% 100%; animation: thumbSkeleton 1.2s infinite;
-}
-@keyframes thumbSkeleton { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-
-/* Video placeholder tile */
+/* Video placeholder tile — no <video> at thumbnail stage */
 .media-thumb-video-icon { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; height:100%; background:var(--them-bg); transition:background .15s; }
 .media-thumb:hover .media-thumb-video-icon { background:var(--accent-light); }
 .thumb-play { font-size:32px; color:var(--accent); line-height:1; }
